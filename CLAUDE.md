@@ -55,8 +55,8 @@ HMAC-SHA256 of the original raw body bytes, keyed with the tenant's secret.
 
 6. Returns that tenant's messages only, as a JSON array of `message_sid`, `claimant_id` (or null), `body`, `category`
    (null for STOP) and `needs_review`. Known tenant with no messages: `[]`. Unknown tenant: 404.
-   **Added after the brief, at the user's request:** a `dnc` field, true when that message is a STOP and false
-   otherwise. It describes the message, not the claimant; `opted_out` remains the claimant's flag.
+   **Added after the brief, at the user's request:** a `dnc` field meaning do not contact. It is true on
+   every message from an opted-out claimant, including earlier ones, and on a STOP from an unmatched number.
 
 ### Tests
 
@@ -110,7 +110,7 @@ HMAC-SHA256 of the original raw body bytes, keyed with the tenant's secret.
 | Unknown extra fields | Ignored | Covered by the signature; providers add fields |
 | Body over 16 KB | 413 | Limits what an unauthenticated caller can send |
 | How STOP is detected | A rule before the classifier, not a fifth category | The brief forbids calling the model for STOP and requires a null category |
-| How `dnc` is stored | Derived from `category IS NULL` | Can't disagree with the category; needs no migration. If anything else ever gets a null category, store it instead |
+| How `dnc` is worked out | The claimant's `opted_out` flag, or a null category | Can't disagree with the flag; needs no migration. The null category covers an unmatched STOP, so if anything else ever gets a null category, change this |
 
 ### Error responses
 

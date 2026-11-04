@@ -10,8 +10,8 @@ requirements are in [`sms-webhook-brief.md`](sms-webhook-brief.md).
 ## Status
 
 **The brief's requirements are built and independently reviewed, with two rejection edge cases still open.** The review
-found five issues: two are fixed and three are pending. All 231 tests pass, and
-[`docs/test-report.md`](docs/test-report.md) records 120 cases with their requests and responses. Each recorded case
+found five issues: two are fixed and three are pending. All 236 tests pass, and
+[`docs/test-report.md`](docs/test-report.md) records 122 cases with their requests and responses. Each recorded case
 also runs as a test.
 
 ### Working end to end
@@ -52,7 +52,6 @@ The review's fixes haven't been re-reviewed.
 | Body over 16 KB returns 413 | The brief has no size limit, so a large signed message is lost, and an unsigned one gets 413 rather than 403. Needs a decision: keep the limit or remove it |
 | Signed `Body` that isn't valid UTF-8 returns 400 | The message is lost. Needs a decision: reject it, or store it with replacement characters |
 | Race test is unreliable | It missed a select-then-insert regression in 13 of 30 runs. The code itself passed; the test needs a tighter barrier |
-| `dnc` meaning | It describes the message, so a later message from an opted-out claimant shows `false`. Needs a decision on whether it should follow the claimant |
 | One `UPDATE` has no `tenant_id` filter | `app/ingest.py` uses a row ID from the same insert, so no failure is possible today. A one-line safeguard |
 | Tests aren't independent | They were written in the same session as the code. `test-writer` should check coverage from the brief |
 
@@ -114,7 +113,8 @@ the hex HMAC-SHA256 of the raw body bytes, keyed with the tenant's secret.
 ### `GET /tenants/{tenant}/messages`
 
 Returns that tenant's messages as a JSON array of `message_sid`, `claimant_id`, `body`, `category`, `needs_review` and
-`dnc`. `category` is null for STOP messages. `dnc` is true when that message is a STOP, and false otherwise.
+`dnc`. `category` is null for STOP messages. `dnc` means do not contact: it is true on every message from a claimant who
+has opted out, including earlier ones, and on a STOP from an unmatched number.
 This route has no authentication, which the brief puts out of scope.
 
 ### Errors
@@ -185,7 +185,7 @@ Each decision started from a way the system could fail. The brief's requirements
 | Save a STOP message and its opt-out in one transaction | If only the message saves, the retry looks like a duplicate and the claimant is never opted out |
 | Treat any invalid classifier answer as `other` with `needs_review` true | Bad output reaches stored data as if it were a real category |
 | Detect STOP with a rule before the classifier, not as a fifth category | The brief forbids calling the model for STOP, and a model could misread an opt-out |
-| Derive `dnc` from the null category rather than storing it | Two stored values could disagree, and existing databases would need a migration |
+| Derive `dnc` from the claimant's `opted_out` flag rather than storing it per message | A later message from an opted-out claimant shows it's fine to contact them, or two stored values disagree |
 
 ### Where the brief was silent
 
@@ -244,7 +244,8 @@ test, and letting STOP skip the signature check fails the forged-STOP cases.
 
 - Secrets are stored in plain text in SQLite. That's acceptable for synthetic fixtures only.
 - The 16 KB limit is checked after the body is read, so it doesn't stop a very large upload reaching memory.
-- Until the `dnc` decision is made, sending code must check `opted_out`, not `dnc`.
+- A STOP from an unmatched number has no claimant to carry the flag, so only that STOP shows `dnc: true`. Later messages
+  from the same number show `false`.
 - A STOP reusing an already stored `MessageSid` returns 200 without opting out, under the "first delivery wins" rule.
   Genuine retries repeat the same message, so this shouldn't happen in practice.
 - Importing `app.main` creates `sms.db`, including during tests. Git ignores it.

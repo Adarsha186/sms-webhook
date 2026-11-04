@@ -120,7 +120,30 @@ def test_later_message_from_opted_out_claimant_keeps_the_flag(client, spy, db_pa
 
     assert opted_out(db_path, "C-100")
     assert spy.calls == ["Hello"]
+    assert [message["dnc"] for message in stored(client)] == [True, True]
+
+
+def test_earlier_message_shows_dnc_after_the_claimant_opts_out(client):
+    post(client, form(MessageSid="SM1", Body="Hello"))
+    post(client, form(MessageSid="SM2", Body="STOP"))
+
+    assert [message["dnc"] for message in stored(client)] == [True, True]
+
+
+def test_dnc_stays_false_for_another_claimant_in_the_tenant(client):
+    post(client, form(MessageSid="SM1", Body="STOP"))
+    post(client, form(MessageSid="SM2", From="+15551110002", Body="Hello"))
+
     assert [message["dnc"] for message in stored(client)] == [True, False]
+
+
+def test_dnc_does_not_cross_to_the_shared_phone_in_another_tenant(client):
+    baker_body = form(To=BAKER_NUMBER, Body="Hello")
+
+    post(client, baker_body, sign(baker_body, BAKER_SECRET))
+    post(client, form(Body="STOP"))
+
+    assert stored(client, "baker-llp")[0]["dnc"] is False
 
 
 def test_failed_opt_out_stores_nothing_so_a_retry_can_succeed(client, db_path):

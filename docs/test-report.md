@@ -6,8 +6,8 @@ Generated on 2026-11-04 by `scripts/generate_test_report.py`. Don't edit this fi
 
 | Run | Total | Passed | Failed |
 |---|---|---|---|
-| Recorded cases (below) | 120 | 120 | 0 |
-| pytest suite | 231 | 231 | 0 |
+| Recorded cases (below) | 122 | 122 | 0 |
+| pytest suite | 236 | 236 | 0 |
 
 Each recorded case runs against the real app with a fresh database. A case passes only if its status, error code, stored row, opt-outs and classifier calls all match. Every rejected case is also checked for no stored rows, no opt-outs and no classifier call.
 
@@ -15,8 +15,8 @@ Each recorded case runs against the real app with a fresh database. A case passe
 |---|---|---|
 | `tests.test_classifier` | 15 | 0 |
 | `tests.test_happy_path` | 9 | 0 |
-| `tests.test_report_cases` | 120 | 0 |
-| `tests.test_stop` | 25 | 0 |
+| `tests.test_report_cases` | 122 | 0 |
+| `tests.test_stop` | 28 | 0 |
 | `tests.test_validation` | 62 | 0 |
 
 ## Request and response fields
@@ -44,7 +44,7 @@ An accepted message returns 200 with an empty body.
 | `body` | string | The text exactly as received |
 | `category` | string or null | One of the four categories; null for STOP |
 | `needs_review` | boolean | True when the classifier failed or gave a bad answer |
-| `dnc` | boolean | True when this message is a STOP |
+| `dnc` | boolean | True when the claimant has opted out, or the message is a STOP from an unmatched number |
 
 ### Error response
 
@@ -177,7 +177,7 @@ Status shows expected / actual. For a case with several deliveries, the request 
 | Two simultaneous del... (42 chars) | `SM1000` | `+15551110001` | `+15550000001` | `Hello` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 | Two simultaneous STO... (37 chars) | `SM1000` | `+15551110001` | `+15550000001` | `STOP` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=None, needs_review=False, dnc=True | C-100 | 0 | PASS |
 
-### 9. STOP and dnc (24 of 24 passed)
+### 9. STOP and dnc (25 of 25 passed)
 
 | Case | MessageSid | From | To | Body | X-Signature | Status | Response body | Stored | Opted out | Calls | Result |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -198,7 +198,8 @@ Status shows expected / actual. For a case with several deliveries, the request 
 | Retry after a failed... (52 chars) | `SM1000` | `+15551110001` | `+15550000001` | `STOP` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=None, needs_review=False, dnc=True | C-100 | 0 | PASS |
 | STOP from an unmatched number | `SM1000` | `+15559999999` | `+15550000001` | `STOP` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=None, category=None, needs_review=False, dnc=True | none | 0 | PASS |
 | Repeat STOP (2 deliveries) | `SM1000` | `+15551110001` | `+15550000001` | `STOP` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=None, needs_review=False, dnc=True | C-100 | 0 | PASS |
-| Later message after ... (42 chars) | `SM2` | `+15551110001` | `+15550000001` | `Thanks` | valid (acme) | 200 / 200 | (empty) | 2 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | C-100 | 1 | PASS |
+| Later message after ... (42 chars) | `SM2` | `+15551110001` | `+15550000001` | `Thanks` | valid (acme) | 200 / 200 | (empty) | 2 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=True | C-100 | 1 | PASS |
+| Earlier message show... (59 chars) | `GET /tenants/acme-law/messages` |  |  |  |  | 200 / 200 | `[{"message_sid":"SM1","claimant_id":"C-100","body":"Hello","category":"other","n...` | 2 row(s); last: claimant=C-100, category=None, needs_review=False, dnc=True | C-100 | 1 | PASS |
 | Not a keyword: 'STOP please' | `SM1000` | `+15551110001` | `+15550000001` | `STOP please` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 | Not a keyword: "don't stop" | `SM1000` | `+15551110001` | `+15550000001` | `don't stop` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 | Not a keyword: 'stop!' | `SM1000` | `+15551110001` | `+15550000001` | `stop!` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | none | 1 | PASS |
@@ -225,7 +226,7 @@ Status shows expected / actual. For a case with several deliveries, the request 
 | Valid answer 'other' | `SM1000` | `+15551110001` | `+15550000001` | `Hello` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 | Classifier receives ... (38 chars) | `SM1000` | `+15551110001` | `+15550000001` | `When is my hearing?` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=status_question, needs_review=False, dnc=False | none | 1 | PASS |
 
-### 11. Tenant isolation (6 of 6 passed)
+### 11. Tenant isolation (7 of 7 passed)
 
 | Case | MessageSid | From | To | Body | X-Signature | Status | Response body | Stored | Opted out | Calls | Result |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -234,6 +235,7 @@ Status shows expected / actual. For a case with several deliveries, the request 
 | Number known only to... (40 chars) | `SM1000` | `+15551110003` | `+15550000001` | `Hello` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=None, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 | STOP to acme opts out only C-100 | `SM1000` | `+15551110001` | `+15550000001` | `STOP` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=None, needs_review=False, dnc=True | C-100 | 0 | PASS |
 | STOP to baker opts out only C-200 | `SM1000` | `+15551110001` | `+15550000002` | `STOP` | valid (baker) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-200, category=None, needs_review=False, dnc=True | C-200 | 0 | PASS |
+| dnc does not cross t... (62 chars) | `SM1000` | `+15551110001` | `+15550000001` | `STOP` | valid (acme) | 200 / 200 | (empty) | 2 row(s); last: claimant=C-200, category=other, needs_review=False, dnc=False | C-100 | 1 | PASS |
 | GET shows only that ... (37 chars) | `GET /tenants/acme-law/messages` |  |  |  |  | 200 / 200 | `[]` | 1 row(s); last: claimant=C-200, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 
 ## What this report does not cover

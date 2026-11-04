@@ -205,7 +205,17 @@ def build_cases() -> List[Case]:
         Case(stop, "Later message after opt-out", 200,
              signed(form(MessageSid="SM1", Body="STOP"))
              + signed(form(MessageSid="SM2", Body="Thanks")),
-             rows=2, stored=message("other"), opted_out=("C-100",), calls=1),
+             rows=2, stored=message("other", dnc=True), opted_out=("C-100",), calls=1),
+        Case(stop, "Earlier message shows dnc after a later STOP", 200,
+             signed(form(MessageSid="SM1", Body="Hello"))
+             + signed(form(MessageSid="SM2", Body="STOP")),
+             rows=2, opted_out=("C-100",), calls=1, get="/tenants/acme-law/messages",
+             get_body=[
+                 {"message_sid": "SM1", "claimant_id": "C-100", "body": "Hello",
+                  "category": "other", "needs_review": False, "dnc": True},
+                 {"message_sid": "SM2", "claimant_id": "C-100", "body": "STOP",
+                  "category": None, "needs_review": False, "dnc": True},
+             ]),
     ]
     for text in ("STOP please", "don't stop", "stop!", "STOP STOP", "S TOP", "unsubscribed"):
         cases.append(Case(stop, f"Not a keyword: {text!r}", 200, signed(form(Body=text)),
@@ -240,6 +250,9 @@ def build_cases() -> List[Case]:
         Case(tenancy, "STOP to baker opts out only C-200", 200,
              [(baker_stop, sign(baker_stop, BAKER_SECRET))],
              rows=1, stored=message(None, claimant="C-200", dnc=True), opted_out=("C-200",)),
+        Case(tenancy, "dnc does not cross to the shared phone in baker", 200,
+             [(baker_body, sign(baker_body, BAKER_SECRET))] + signed(form(Body="STOP")),
+             rows=2, stored=message("other", claimant="C-200"), opted_out=("C-100",), calls=1),
         Case(tenancy, "GET shows only that tenant's messages", 200,
              [(baker_body, sign(baker_body, BAKER_SECRET))], rows=1, calls=1,
              get="/tenants/acme-law/messages", get_body=[]),
@@ -455,7 +468,7 @@ An accepted message returns 200 with an empty body.
 | `body` | string | The text exactly as received |
 | `category` | string or null | One of the four categories; null for STOP |
 | `needs_review` | boolean | True when the classifier failed or gave a bad answer |
-| `dnc` | boolean | True when this message is a STOP |
+| `dnc` | boolean | True when the claimant has opted out, or the message is a STOP from an unmatched number |
 
 ### Error response
 
