@@ -1,8 +1,10 @@
 import threading
+from contextlib import closing
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.db import connect
 from app.main import create_app
 from failure_data import (
     ACCEPTED_BODIES,
@@ -18,7 +20,9 @@ from helpers import SpyClassifier, post, stored
 
 
 @pytest.mark.parametrize("case", ALL_FAILURES, ids=lambda case: case.id)
-def test_bad_input_is_rejected_without_side_effects(client, spy, case: FailureCase):
+def test_bad_input_is_rejected_without_side_effects(
+    client, spy, db_path, case: FailureCase
+):
     response = post(client, case.body, case.signature)
 
     assert response.status_code == case.status
@@ -27,6 +31,8 @@ def test_bad_input_is_rejected_without_side_effects(client, spy, case: FailureCa
     assert stored(client, "acme-law") == []
     assert stored(client, "baker-llp") == []
     assert spy.calls == []
+    with closing(connect(db_path)) as conn:
+        assert conn.execute("SELECT id FROM claimants WHERE opted_out = 1").fetchall() == []
 
 
 @pytest.mark.parametrize("name", ACCEPTED_BODIES)

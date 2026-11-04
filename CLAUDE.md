@@ -29,6 +29,7 @@ read-only, and only the main session commits or pushes.
 - Install: `.venv/bin/python -m pip install -r requirements.txt`
 - Test: `.venv/bin/python -m pytest -q`
 - Run: `.venv/bin/python -m uvicorn app.main:app --reload`
+- Test report: `.venv/bin/python scripts/generate_test_report.py` (writes `docs/test-report.md`)
 
 ## Requirements
 
@@ -103,8 +104,8 @@ HMAC-SHA256 of the original raw body bytes, keyed with the tenant's secret.
 | Opted-out claimant texts again | Store and classify; flag stays set | The brief defines no way to opt back in |
 | Repeat `MessageSid` with different body | Keep the first version | The first stored delivery wins |
 | Repeat `MessageSid` with bad signature | 403 | Signature checks run before duplicate checks |
-| `MessageSid` format | 1 to 64 of `A-Za-z0-9_-`, else 400 | Unusual characters would break duplicate matching; never trim it |
-| `From`, `To` format | Max 32 characters, no control characters; no phone check | An unknown `To` must reach the 404, and an unmatched `From` is stored |
+| `MessageSid` format | 1 to 255 characters, no spaces or control characters, else 400, checked after the signature | The brief gives no format and rejecting a signed message loses it; never trim it |
+| `From`, `To` format | Not checked beyond present and not empty | An unknown `To` must reach the 404, and an unmatched `From` is stored |
 | Wrong `Content-Type` | Not rejected | The body decides: a non-form body fails as missing fields |
 | Unknown extra fields | Ignored | Covered by the signature; providers add fields |
 | Body over 16 KB | 413 | Limits what an unauthenticated caller can send |
@@ -115,7 +116,8 @@ HMAC-SHA256 of the original raw body bytes, keyed with the tenant's secret.
 
 Every rejection raises `InvalidRequest(status, code, message)`, which returns
 `{"error": {"code": ..., "message": ...}}`. Messages never repeat the caller's input. Missing and wrong signatures
-return an identical response. Checks run in this order: 413, 400, 404, 403.
+return an identical response. Checks run in this order: 413, missing or malformed input (400), 404, 403, then
+`MessageSid` format (400). A format check must never run before the signature check.
 
 ## Implementation traps
 

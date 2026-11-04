@@ -55,6 +55,14 @@ def test_stop_keyword_opts_out_without_calling_classifier(client, spy, db_path, 
     ]
 
 
+@pytest.mark.parametrize("sid", ["SM.0001", "msg:abc", "S" * 65])
+def test_signed_stop_with_unusual_message_sid_still_opts_out(client, db_path, sid):
+    response = post(client, form(MessageSid=sid, Body="STOP"))
+
+    assert response.status_code == 200
+    assert opted_out(db_path, "C-100")
+
+
 def test_stop_opts_out_only_that_claimant_in_that_tenant(client, db_path):
     post(client, form(Body="STOP"))
 

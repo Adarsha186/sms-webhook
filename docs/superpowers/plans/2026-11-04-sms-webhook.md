@@ -50,7 +50,8 @@ Changing anything here needs the orchestrator's agreement, and both agents must 
 - `InvalidRequest(status: int, code: str, message: str)`: a `ValueError` that the app turns into the JSON error
   response.
 - `parse_form(raw: bytes) -> Dict[str, str]`: raises `InvalidRequest` for undecodable bytes, a repeated field, a missing
-  field, an empty `MessageSid`, `From` or `To`, or an invalid `MessageSid`, `From` or `To`. An empty `Body` is valid.
+  field, or an empty `MessageSid`, `From` or `To`. An empty `Body` is valid.
+- `validate_message_sid(message_sid: str) -> None`: raises `InvalidRequest`. Runs after the signature check.
 - `verify_signature(raw: bytes, secret: str, signature: Optional[str]) -> bool`: never raises.
 
 ### `app/classifier.py`

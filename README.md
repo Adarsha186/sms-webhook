@@ -9,23 +9,53 @@ requirements are in [`sms-webhook-brief.md`](sms-webhook-brief.md).
 
 ## Status
 
-**All the brief's requirements are built, and `dnc` is an addition to them.** The code has not had its independent
-review yet.
+**The brief's requirements are built and independently reviewed, with two rejection edge cases still open.** The review
+found five issues: two are fixed and three are pending. All 111 tests pass, and
+[`docs/test-report.md`](docs/test-report.md) records 95 cases with their requests and responses. Nothing has been
+pushed to GitHub yet.
 
-| Behaviour | Status |
+### Working end to end
+
+Each flow runs from the HTTP request through the signature check and database to the GET response. All of them are
+tested through the app. The first two, plus a duplicate and a forged STOP, were also checked on a running server.
+
+| Flow | What happens |
 |---|---|
-| Signed message is stored, classified and listed | Done |
-| Sender matched within the tenant only; no match stores no claimant | Done |
-| Missing or wrong signature returns 403 and stores nothing | Done |
-| Known tenant with no messages returns `[]` | Done |
-| Duplicate `MessageSid` returns 200 without reclassifying, including simultaneous deliveries | Done |
-| Missing field returns 400 | Done |
-| Malformed input returns a JSON error, not a 500 | Done |
-| Unknown `To` returns 404 | Done |
-| Unknown tenant on GET returns 404 | Done |
-| `STOP`, `STOPALL`, `UNSUBSCRIBE` opt-out, without calling the classifier | Done |
-| `dnc` field on each message | Done |
-| Bad classifier answer or error stores `other` for review | Done |
+| Normal message | Signature checked, claimant matched in that tenant, message stored, classified from `Body` only, returned by GET |
+| STOP, `STOPALL`, `UNSUBSCRIBE` | Message stored with a null category and `dnc: true`, and `opted_out` set in the same transaction, with no classifier call |
+| Unknown sender | Stored with no claimant; a STOP from one opts nobody out |
+| Provider retry | Stored once per tenant and classified once, including simultaneous deliveries; returns 200 |
+| Forged or missing signature | 403, with nothing stored, nobody opted out, and no classifier call |
+| Classifier failure or bad answer | Message kept as `other` with `needs_review: true`; returns 200 |
+| Malformed input | A JSON error with a stable code, not a 500 |
+| Shared phone number | Matches only the claimant in the tenant that received the message |
+| Reading messages | Only that tenant's messages; `[]` when there are none; 404 for an unknown tenant |
+
+### Implemented, by requirement
+
+| # | Requirement | Status |
+|---|---|---|
+| 1 | Validation order and status codes | Built, except the two open rejections under Pending |
+| 2 | Idempotent delivery | Built |
+| 3 | Claimant matching within the tenant | Built |
+| 4 | STOP opt-out | Built |
+| 5 | Classification and failure handling | Built |
+| 6 | GET route | Built, with the added `dnc` field |
+| 7 | Required tests | Built |
+
+The review's fixes haven't been re-reviewed.
+
+### Pending
+
+| Item | Why it's open |
+|---|---|
+| Body over 16 KB returns 413 | The brief has no size limit, so a large signed message is lost, and an unsigned one gets 413 rather than 403. Needs a decision: keep the limit or remove it |
+| Signed `Body` that isn't valid UTF-8 returns 400 | The message is lost. Needs a decision: reject it, or store it with replacement characters |
+| Race test is unreliable | It missed a select-then-insert regression in 13 of 30 runs, and pytest has no simultaneous STOP test. The code itself passed; the test needs a tighter barrier |
+| `dnc` meaning | It describes the message, so a later message from an opted-out claimant shows `false`. Needs a decision on whether it should follow the claimant |
+| One `UPDATE` has no `tenant_id` filter | `app/ingest.py` uses a row ID from the same insert, so no failure is possible today. A one-line safeguard |
+| Tests aren't independent | They were written in the same session as the code. `test-writer` should check coverage from the brief |
+| Push to GitHub | Needs a repository name and visibility |
 
 ## How to run
 
@@ -40,6 +70,12 @@ Run the tests:
 
 ```bash
 .venv/bin/python -m pytest -q
+```
+
+Regenerate the test report, which records each case's request and response in `docs/test-report.md`:
+
+```bash
+.venv/bin/python scripts/generate_test_report.py
 ```
 
 Start the server. It creates and seeds `sms.db` in the project root, or the path in `SMS_DB_PATH`:
@@ -96,14 +132,14 @@ phone numbers.
 | 400 | `missing_field` | A field is absent, or `MessageSid`, `From` or `To` is empty |
 | 400 | `repeated_field` | A required field appears more than once |
 | 400 | `invalid_encoding` | The body is not valid UTF-8 |
-| 400 | `invalid_message_sid` | `MessageSid` isn't 1 to 64 letters, digits, dashes or underscores |
-| 400 | `invalid_from`, `invalid_to` | Over 32 characters, or contains control characters |
+| 400 | `invalid_message_sid` | `MessageSid` is over 255 characters, or contains spaces or control characters |
 | 403 | `invalid_signature` | The signature is missing or wrong; both get the same response |
 | 404 | `unknown_to` | No tenant uses that number |
 | 404 | `unknown_tenant` | GET for a tenant that doesn't exist |
 | 413 | `request_too_large` | The body is over 16 KB |
 
-Checks run in that order: 413, then 400, then 404, then 403. None of them writes anything.
+Checks run in this order: 413, missing or malformed input (400), 404, 403, then `MessageSid` format (400). None of them
+writes anything. The format check runs last so it can't replace a 403 or 404 the brief requires.
 
 ## How it works
 
@@ -119,7 +155,7 @@ A delivery is handled in this order:
 
 1. Read the raw bytes and parse them.
 2. Find the tenant from `To`.
-3. Verify the signature. Nothing is written before this passes.
+3. Verify the signature, then check the `MessageSid` format. Nothing is written before these pass.
 4. Find the claimant within that tenant.
 5. If the text is a STOP keyword, store the message and set `opted_out` in one transaction, then finish. The classifier
    is not called.
@@ -143,7 +179,8 @@ Each decision started from a way the system could fail. The brief's requirements
 | Run database work in a threadpool | Blocking calls in an `async` route process requests one at a time, which would also let a race test pass without proving anything |
 | Open one SQLite connection per call, using WAL and a busy timeout | Connections shared across threads fail, and simultaneous writers fail immediately rather than waiting |
 | Let the database decide duplicates, using `INSERT ... ON CONFLICT DO NOTHING` and checking the row count | Two simultaneous deliveries both pass a select-then-insert check, and both call the classifier |
-| Reject a `MessageSid` with spaces or other unusual characters rather than trimming it | `SM1` and `SM1 ` count as different messages, so a retry slips past the duplicate check |
+| Reject a `MessageSid` containing spaces or control characters rather than trimming it | `SM1` and `SM1 ` count as different messages, so a retry slips past the duplicate check |
+| Check the `MessageSid` format only after the signature, and keep the rule loose | A strict check before the signature lost signed STOPs and replaced required 403 and 404 responses; the review found this |
 | Give missing and wrong signatures an identical response | The response reveals how close a forged request came |
 | Keep error messages free of the caller's input | Phone numbers leak into responses and logs |
 | Save a STOP message and its opt-out in one transaction | If only the message saves, the retry looks like a duplicate and the claimant is never opted out |
@@ -163,8 +200,8 @@ These were judgment calls, chosen to be strict and predictable:
 | `STOP please`, `don't stop` | Classify normally | Only an exact keyword after stripping is an opt-out |
 | Opted-out claimant texts again | Store and classify; the flag stays set | The brief defines no way to opt back in |
 | Repeat `MessageSid` with a different body | Keep the first | The first stored delivery wins |
-| `MessageSid` format | 1 to 64 letters, digits, dashes or underscores | Allows the brief's `SM0001` and common provider IDs, and blocks values that break duplicate matching |
-| `From` and `To` format | No phone-number check; only length and control characters | The brief wants an unknown `To` to return 404 and an unmatched `From` to be stored, and senders can be short codes |
+| `MessageSid` format | 1 to 255 characters, no spaces or control characters | The brief gives no format, and rejecting a signed message loses it, so this blocks only values that can't be a stable ID |
+| `From` and `To` format | Not checked, beyond being present and not empty | The brief wants an unknown `To` to return 404 and an unmatched `From` to be stored, and senders can be short codes |
 | Wrong `Content-Type` | Not rejected | The body decides: a non-form body fails as missing fields |
 | Unknown extra fields | Ignored | They are covered by the signature, and providers often add fields |
 | Body over 16 KB | 413 | Far above any SMS, and limits what an unauthenticated caller can send |
@@ -187,12 +224,30 @@ This project was built by directing coding agents, as the brief requires.
 The code so far was written test-first in the main session, not by the separate `builder` and `test-writer` agents, so
 its tests are not yet an independent check of the code.
 
+### Independent review
+
+An agent that didn't write the code reviewed it against the brief, running as a read-only `Plan` agent that followed
+`.claude/agents/reviewer.md`, because that definition hadn't loaded in the session. The brief allows acting on up to two
+findings:
+
+| # | Finding | Decision |
+|---|---|---|
+| 1 | Format checks rejected messages the brief requires, including signed STOPs | Fixed. The tests that asserted this were wrong, because they required a 400 where the brief requires a 200, 403 or 404 |
+| 2 | No test covered a forged STOP | Fixed. Putting a STOP signature bypass back in now fails exactly the three new cases |
+| 3 | The race test misses a select-then-insert regression 13 times in 30 | Pending. The production code passed |
+| 4 | The size limit and non-UTF-8 rejection lose messages | Pending. Needs a decision |
+| 5 | One `UPDATE` has no `tenant_id` filter | Pending. No failure is possible today |
+
+Two tests have been shown to fail when their protection is removed: splitting the STOP transaction fails the rollback
+test, and letting STOP skip the signature check fails the forged-STOP cases.
+
 ## Known limitations
 
 - Secrets are stored in plain text in SQLite. That's acceptable for synthetic fixtures only.
-- `dnc` describes the message, not the claimant. A later ordinary message from an opted-out claimant shows `dnc: false`,
-  so sending code must check `opted_out`, not `dnc`.
 - The 16 KB limit is checked after the body is read, so it doesn't stop a very large upload reaching memory.
+- Until the `dnc` decision is made, sending code must check `opted_out`, not `dnc`.
+- A STOP reusing an already stored `MessageSid` returns 200 without opting out, under the "first delivery wins" rule.
+  Genuine retries repeat the same message, so this shouldn't happen in practice.
 - Importing `app.main` creates `sms.db`, including during tests. Git ignores it.
 - If a process crashes between storing and classifying, the message stays as `other` for review and is not retried.
 

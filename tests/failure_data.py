@@ -57,21 +57,13 @@ INVALID_MESSAGE_SIDS = [
     FailureCase("sid-trailing-space", form(MessageSid="SM1 "), 400, "invalid_message_sid"),
     FailureCase("sid-trailing-newline", form(MessageSid="SM1\n"), 400, "invalid_message_sid"),
     FailureCase("sid-nul-byte", form(MessageSid="SM\x001"), 400, "invalid_message_sid"),
-    FailureCase("sid-too-long", form(MessageSid="S" * 65), 400, "invalid_message_sid"),
-    FailureCase("sid-non-ascii", form(MessageSid="SMé1"), 400, "invalid_message_sid"),
+    FailureCase("sid-too-long", form(MessageSid="S" * 256), 400, "invalid_message_sid"),
     FailureCase(
         "sid-sql-text",
         form(MessageSid="SM1'; DROP TABLE messages;--"),
         400,
         "invalid_message_sid",
     ),
-]
-
-INVALID_FIELDS = [
-    FailureCase("from-too-long", form(From="+1" * 20), 400, "invalid_from"),
-    FailureCase("from-control-character", form(From="+1555\x00"), 400, "invalid_from"),
-    FailureCase("to-too-long", form(To="+1" * 20), 400, "invalid_to"),
-    FailureCase("to-control-character", form(To="+1555\n"), 400, "invalid_to"),
 ]
 
 MALFORMED_BODIES = [
@@ -91,6 +83,8 @@ UNKNOWN_NUMBERS = [
     FailureCase("unknown-to", form(To="+15559999999"), 404, "unknown_to"),
     FailureCase("to-is-not-a-number", form(To="not-a-number"), 404, "unknown_to"),
     FailureCase("unknown-to-unsigned", form(To="+15559999999"), 404, "unknown_to", None),
+    FailureCase("to-very-long", form(To="+1" * 20), 404, "unknown_to"),
+    FailureCase("to-control-character", form(To="+1555\n"), 404, "unknown_to"),
 ]
 
 BAD_SIGNATURES = [
@@ -115,12 +109,21 @@ BAD_SIGNATURES = [
         "invalid_signature",
         sign(form()),
     ),
+    FailureCase("bad-sid-unsigned", form(MessageSid="SM 1"), 403, "invalid_signature", None),
+    FailureCase("forged-stop-unsigned", form(Body="STOP"), 403, "invalid_signature", None),
+    FailureCase("forged-stop-wrong", form(Body="STOP"), 403, "invalid_signature", "0" * 64),
+    FailureCase(
+        "forged-stop-other-tenant",
+        form(Body="STOP"),
+        403,
+        "invalid_signature",
+        sign(form(Body="STOP"), BAKER_SECRET),
+    ),
 ]
 
 ALL_FAILURES = (
     MISSING_FIELDS
     + INVALID_MESSAGE_SIDS
-    + INVALID_FIELDS
     + MALFORMED_BODIES
     + UNKNOWN_NUMBERS
     + BAD_SIGNATURES
@@ -128,8 +131,13 @@ ALL_FAILURES = (
 
 # Unusual but valid: these must still be accepted.
 ACCEPTED_BODIES = {
-    "sid-at-max-length": form(MessageSid="S" * 64),
+    "sid-at-max-length": form(MessageSid="S" * 255),
     "sid-with-dash-and-underscore": form(MessageSid="SM_a-1"),
+    "sid-with-dot": form(MessageSid="SM.0001"),
+    "sid-with-colon": form(MessageSid="msg:abc"),
+    "sid-non-ascii": form(MessageSid="SM\u00e91"),
+    "very-long-sender": form(From="+1" * 20),
+    "sender-with-control-character": form(From="+1555\x00"),
     "empty-message-body": form(Body=""),
     "short-code-sender": form(From="12345"),
     "unknown-sender-text": form(From="unknown"),

@@ -8,10 +8,9 @@ MAX_BODY_BYTES = 16 * 1024
 REQUIRED_FIELDS = ("MessageSid", "From", "To", "Body")
 NON_EMPTY_FIELDS = ("MessageSid", "From", "To")
 
-MESSAGE_SID = re.compile(r"[A-Za-z0-9_-]{1,64}")
-# Deliberately loose: an unknown To must reach the 404 and an unmatched From is
-# still stored, so these are not phone-format checks.
-NUMBER = re.compile(r"[^\x00-\x1f\x7f]{1,32}")
+# Deliberately loose: the brief gives no format, and rejecting a signed message
+# loses it. This only blocks values that can't be a stable identifier.
+MESSAGE_SID = re.compile(r"[^\s\x00-\x1f\x7f]{1,255}")
 
 
 class InvalidRequest(ValueError):
@@ -38,18 +37,17 @@ def parse_form(raw: bytes) -> Dict[str, str]:
     for field in REQUIRED_FIELDS:
         if form[field] is None or (field in NON_EMPTY_FIELDS and not form[field]):
             raise InvalidRequest(400, "missing_field", f"{field} is required.")
+    return form
 
-    if not MESSAGE_SID.fullmatch(form["MessageSid"]):
+
+def validate_message_sid(message_sid: str) -> None:
+    """Runs after the signature check, so it can't replace a required 403 or 404."""
+    if not MESSAGE_SID.fullmatch(message_sid):
         raise InvalidRequest(
             400,
             "invalid_message_sid",
-            "MessageSid must be 1 to 64 letters, digits, dashes or underscores.",
+            "MessageSid must be 1 to 255 characters, with no spaces or control characters.",
         )
-    if not NUMBER.fullmatch(form["From"]):
-        raise InvalidRequest(400, "invalid_from", "From is not a valid sender.")
-    if not NUMBER.fullmatch(form["To"]):
-        raise InvalidRequest(400, "invalid_to", "To is not a valid number.")
-    return form
 
 
 def verify_signature(raw: bytes, secret: str, signature: Optional[str]) -> bool:
