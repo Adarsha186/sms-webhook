@@ -54,6 +54,8 @@ HMAC-SHA256 of the original raw body bytes, keyed with the tenant's secret.
 
 6. Returns that tenant's messages only, as a JSON array of `message_sid`, `claimant_id` (or null), `body`, `category`
    (null for STOP) and `needs_review`. Known tenant with no messages: `[]`. Unknown tenant: 404.
+   **Added after the brief, at the user's request:** a `dnc` field, true when that message is a STOP and false
+   otherwise. It describes the message, not the claimant; `opted_out` remains the claimant's flag.
 
 ### Tests
 
@@ -106,6 +108,8 @@ HMAC-SHA256 of the original raw body bytes, keyed with the tenant's secret.
 | Wrong `Content-Type` | Not rejected | The body decides: a non-form body fails as missing fields |
 | Unknown extra fields | Ignored | Covered by the signature; providers add fields |
 | Body over 16 KB | 413 | Limits what an unauthenticated caller can send |
+| How STOP is detected | A rule before the classifier, not a fifth category | The brief forbids calling the model for STOP and requires a null category |
+| How `dnc` is stored | Derived from `category IS NULL` | Can't disagree with the category; needs no migration. If anything else ever gets a null category, store it instead |
 
 ### Error responses
 
@@ -132,7 +136,7 @@ return an identical response. Checks run in this order: 413, 400, 404, 403.
 - `app/security.py`: `parse_form`, `verify_signature`
 - `app/classifier.py`: `KeywordClassifier`, `safe_classify`
 - `app/ingest.py`: `is_stop`, `process_sms`
-- `tests/`: `test_happy_path.py`, `test_validation.py` and the `failure_data.py` catalogue so far; more to follow
+- `tests/`: one file per area (happy path, validation, STOP, classifier), with `failure_data.py`, `helpers.py` and `conftest.py`
 
 ## Testing standards
 

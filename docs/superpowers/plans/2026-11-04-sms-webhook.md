@@ -37,7 +37,7 @@ Changing anything here needs the orchestrator's agreement, and both agents must 
 - `get_tenant_by_number(conn, number: str) -> Optional[sqlite3.Row]`
 - `get_tenant(conn, tenant_id: str) -> Optional[sqlite3.Row]`
 - `find_claimant(conn, tenant_id: str, phone: str) -> Optional[sqlite3.Row]`
-- `list_messages(conn, tenant_id: str) -> List[dict]`: the five response fields, in insert order.
+- `list_messages(conn, tenant_id: str) -> List[dict]`: the six response fields, in insert order.
 
 ### Schema
 - `tenants(id TEXT PRIMARY KEY, number TEXT UNIQUE NOT NULL, secret TEXT NOT NULL)`; `id` is the slug, such as `acme-law`.
@@ -116,7 +116,7 @@ was not called.
 
 ### `tests/test_messages_api.py`
 - Known tenant with no messages returns `[]`; unknown tenant returns 404.
-- Each item has exactly the five fields, and `needs_review` is a JSON boolean.
+- Each item has exactly the six fields, and `needs_review` and `dnc` are JSON booleans.
 - A tenant never sees another tenant's messages.
 
 ## How agent output is checked

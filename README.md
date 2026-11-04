@@ -9,8 +9,8 @@ requirements are in [`sms-webhook-brief.md`](sms-webhook-brief.md).
 
 ## Status
 
-**Input validation is done, but this is not a finished feature.** STOP handling and classifier failure handling are
-still missing, so it does not meet the brief yet.
+**All the brief's requirements are built, and `dnc` is an addition to them.** The code has not had its independent
+review yet.
 
 | Behaviour | Status |
 |---|---|
@@ -23,8 +23,9 @@ still missing, so it does not meet the brief yet.
 | Malformed input returns a JSON error, not a 500 | Done |
 | Unknown `To` returns 404 | Done |
 | Unknown tenant on GET returns 404 | Done |
-| `STOP`, `STOPALL`, `UNSUBSCRIBE` opt-out | **Not built:** classified like any other text |
-| Bad classifier answer or error stores `other` for review | **Not built:** a bad answer is stored as the category; an error returns 500 |
+| `STOP`, `STOPALL`, `UNSUBSCRIBE` opt-out, without calling the classifier | Done |
+| `dnc` field on each message | Done |
+| Bad classifier answer or error stores `other` for review | Done |
 
 ## How to run
 
@@ -63,7 +64,7 @@ curl http://127.0.0.1:8000/tenants/acme-law/messages
 ```
 
 ```json
-[{"message_sid":"SM0001","claimant_id":"C-100","body":"When is my hearing?","category":"status_question","needs_review":false}]
+[{"message_sid":"SM0001","claimant_id":"C-100","body":"When is my hearing?","category":"status_question","needs_review":false,"dnc":false}]
 ```
 
 Sending the same example again returns 200 and stores nothing new. To start again, stop the server and delete `sms.db`, `sms.db-wal` and `sms.db-shm`.
@@ -77,7 +78,8 @@ the hex HMAC-SHA256 of the raw body bytes, keyed with the tenant's secret.
 
 ### `GET /tenants/{tenant}/messages`
 
-Returns that tenant's messages as a JSON array of `message_sid`, `claimant_id`, `body`, `category` and `needs_review`.
+Returns that tenant's messages as a JSON array of `message_sid`, `claimant_id`, `body`, `category`, `needs_review` and
+`dnc`. `category` is null for STOP messages. `dnc` is true when that message is a STOP, and false otherwise.
 This route has no authentication, which the brief puts out of scope.
 
 ### Errors
@@ -119,16 +121,16 @@ A delivery is handled in this order:
 2. Find the tenant from `To`.
 3. Verify the signature. Nothing is written before this passes.
 4. Find the claimant within that tenant.
-5. Insert and commit the message as `other`, flagged for review.
-6. Call the classifier with the `Body` text only.
-7. Update the row with the category and clear the review flag.
+5. If the text is a STOP keyword, store the message and set `opted_out` in one transaction, then finish. The classifier
+   is not called.
+6. Otherwise, insert and commit the message as `other`, flagged for review. If it already exists, finish.
+7. Call the classifier with the `Body` text only.
+8. If the answer is valid, update the row with the category and clear the review flag.
 
 ## How the design decisions were made
 
 Each decision started from a way the system could fail. The brief's requirements were read as failure scenarios first
 (a retry, a shared phone number, a crash mid-request), and the design had to make that failure hard or impossible.
-
-### Built
 
 | Decision | The failure it prevents |
 |---|---|
@@ -144,13 +146,10 @@ Each decision started from a way the system could fail. The brief's requirements
 | Reject a `MessageSid` with spaces or other unusual characters rather than trimming it | `SM1` and `SM1 ` count as different messages, so a retry slips past the duplicate check |
 | Give missing and wrong signatures an identical response | The response reveals how close a forged request came |
 | Keep error messages free of the caller's input | Phone numbers leak into responses and logs |
-
-### Planned
-
-| Decision | The failure it prevents |
-|---|---|
 | Save a STOP message and its opt-out in one transaction | If only the message saves, the retry looks like a duplicate and the claimant is never opted out |
 | Treat any invalid classifier answer as `other` with `needs_review` true | Bad output reaches stored data as if it were a real category |
+| Detect STOP with a rule before the classifier, not as a fifth category | The brief forbids calling the model for STOP, and a model could misread an opt-out |
+| Derive `dnc` from the null category rather than storing it | Two stored values could disagree, and existing databases would need a migration |
 
 ### Where the brief was silent
 
@@ -170,7 +169,7 @@ These were judgment calls, chosen to be strict and predictable:
 | Unknown extra fields | Ignored | They are covered by the signature, and providers often add fields |
 | Body over 16 KB | 413 | Far above any SMS, and limits what an unauthenticated caller can send |
 
-The two STOP rows aren't built yet; the rest are. `CLAUDE.md` has the full list.
+`CLAUDE.md` has the full list.
 
 ## How it was built
 
@@ -185,12 +184,14 @@ This project was built by directing coding agents, as the brief requires.
 - **Permissions:** `.claude/settings.json` keeps agents inside the repository, sandboxes shell commands, blocks web
   access, and requires approval for pushes. Agents can't edit these settings.
 
-The happy path so far was written test-first in the main session, not by the separate `builder` and `test-writer`
-agents, so its tests are not yet an independent check of the code.
+The code so far was written test-first in the main session, not by the separate `builder` and `test-writer` agents, so
+its tests are not yet an independent check of the code.
 
 ## Known limitations
 
 - Secrets are stored in plain text in SQLite. That's acceptable for synthetic fixtures only.
+- `dnc` describes the message, not the claimant. A later ordinary message from an opted-out claimant shows `dnc: false`,
+  so sending code must check `opted_out`, not `dnc`.
 - The 16 KB limit is checked after the body is read, so it doesn't stop a very large upload reaching memory.
 - Importing `app.main` creates `sms.db`, including during tests. Git ignores it.
 - If a process crashes between storing and classifying, the message stays as `other` for review and is not retried.

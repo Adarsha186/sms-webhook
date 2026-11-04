@@ -79,4 +79,12 @@ def list_messages(conn, tenant_id: str) -> List[dict]:
         "FROM messages WHERE tenant_id = ? ORDER BY id",
         (tenant_id,),
     ).fetchall()
-    return [{**dict(row), "needs_review": bool(row["needs_review"])} for row in rows]
+    # dnc is derived: STOP messages are the only ones with no category.
+    return [
+        {
+            **dict(row),
+            "needs_review": bool(row["needs_review"]),
+            "dnc": row["category"] is None,
+        }
+        for row in rows
+    ]

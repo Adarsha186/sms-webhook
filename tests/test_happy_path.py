@@ -49,6 +49,7 @@ def test_brief_example_is_stored_and_listed(client):
             "body": "When is my hearing?",
             "category": "status_question",
             "needs_review": False,
+            "dnc": False,
         }
     ]
 

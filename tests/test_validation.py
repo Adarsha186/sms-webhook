@@ -1,6 +1,4 @@
 import threading
-import time
-from typing import Optional
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,52 +6,15 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from failure_data import (
     ACCEPTED_BODIES,
-    ACME_SECRET,
     ALL_FAILURES,
     BAKER_NUMBER,
     BAKER_SECRET,
-    SENDER,
     SIGN_WITH_ACME,
     FailureCase,
     form,
     sign,
 )
-
-CONTENT_TYPE = {"Content-Type": "application/x-www-form-urlencoded"}
-
-
-class SpyClassifier:
-    def __init__(self, delay: float = 0):
-        self.calls = []
-        self.delay = delay
-
-    def classify(self, text):
-        self.calls.append(text)
-        time.sleep(self.delay)
-        return "other"
-
-
-@pytest.fixture
-def spy():
-    return SpyClassifier()
-
-
-@pytest.fixture
-def client(tmp_path, spy):
-    return TestClient(create_app(str(tmp_path / "test.db"), spy))
-
-
-def post(client, body: bytes, signature):
-    headers = dict(CONTENT_TYPE)
-    if signature == SIGN_WITH_ACME:
-        headers["X-Signature"] = sign(body)
-    elif signature is not None:
-        headers["X-Signature"] = signature
-    return client.post("/webhooks/sms", content=body, headers=headers)
-
-
-def stored(client, tenant="acme-law"):
-    return client.get(f"/tenants/{tenant}/messages").json()
+from helpers import SpyClassifier, post, stored
 
 
 @pytest.mark.parametrize("case", ALL_FAILURES, ids=lambda case: case.id)
