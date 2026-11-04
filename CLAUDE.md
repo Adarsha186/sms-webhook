@@ -138,7 +138,8 @@ return an identical response. Checks run in this order: 413, missing or malforme
 - `app/security.py`: `parse_form`, `verify_signature`
 - `app/classifier.py`: `KeywordClassifier`, `safe_classify`
 - `app/ingest.py`: `is_stop`, `process_sms`
-- `tests/`: one file per area (happy path, validation, STOP, classifier), with `failure_data.py`, `helpers.py` and `conftest.py`
+- `tests/`: one file per area (happy path, validation, STOP, classifier), with `failure_data.py`, `helpers.py` and
+  `conftest.py`. `test_report_cases.py` runs every case from `scripts/generate_test_report.py`, so add report cases there
 
 ## Testing standards
 

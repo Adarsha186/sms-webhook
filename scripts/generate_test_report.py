@@ -23,7 +23,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "tests")]
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.classifier import KeywordClassifier  # noqa: E402
+from app.classifier import CATEGORIES, KeywordClassifier  # noqa: E402
 from app.db import connect  # noqa: E402
 from app.main import create_app  # noqa: E402
 from failure_data import (  # noqa: E402
@@ -82,6 +82,10 @@ class Case:
     get: Optional[str] = None
     get_body: Optional[object] = None
     concurrent: bool = False
+    block_opt_out: bool = False
+    same_response: bool = False
+    not_in_response: Optional[str] = None
+    classifier_saw: Optional[List[str]] = None
 
 
 def message(category, claimant="C-100", needs_review=False, dnc=False):
@@ -109,6 +113,9 @@ def build_cases() -> List[Case]:
     cases = [
         Case(basic, "Brief's signed example", 200, [(BRIEF_BODY, BRIEF_SIGNATURE)],
              rows=1, stored=message("status_question"), calls=1),
+        Case(basic, "Status question about a case", 200,
+             signed(form(Body="What is the status of my case?")),
+             rows=1, stored=message("status_question"), calls=1),
         Case(basic, "Sender with no claimant", 200, signed(form(From="+15559999999")),
              rows=1, stored=message("other", claimant=None), calls=1),
         Case(basic, "Document message", 200, signed(form(Body="I have attached the document")),
@@ -135,10 +142,20 @@ def build_cases() -> List[Case]:
         ("5. Unknown To", UNKNOWN_NUMBERS),
         ("6. Bad signatures", BAD_SIGNATURES),
     ):
+        cases.append(Case(group, "Control: same request with nothing wrong", 200, signed(form()),
+                          rows=1, stored=message("other"), calls=1))
         cases += [
             Case(group, f.id, f.status, [(f.body, f.signature)], code=f.code)
             for f in failures
         ]
+
+    cases += [
+        Case("6. Bad signatures", "Missing and wrong signatures get identical responses", 403,
+             [(form(), None), (form(), "0" * 64)], code="invalid_signature", same_response=True),
+        Case("5. Unknown To", "Error does not repeat the caller's numbers", 404,
+             signed(form(To="+15559999999", From="+15557654321")), code="unknown_to",
+             not_in_response="1555"),
+    ]
 
     cases += [
         Case("7. Unusual but valid input", name, 200, signed(body), rows=1, calls=1)
@@ -161,13 +178,25 @@ def build_cases() -> List[Case]:
     ]
 
     stop_stored = message(None, dnc=True)
-    for text in ("STOP", "stop", "Stop", "STOPALL", "UNSUBSCRIBE", "  Unsubscribe  ", "STOP\n"):
+    for text in ("STOP", "stop", "Stop", "STOPALL", "stopall", "UNSUBSCRIBE", "unsubscribe",
+                 "  Unsubscribe  ", "STOP\n", "\tstop "):
         cases.append(Case(stop, f"Keyword {text!r}", 200, signed(form(Body=text)),
                           rows=1, stored=stop_stored, opted_out=("C-100",)))
     cases += [
-        Case(stop, "STOP with unusual MessageSid", 200,
+        Case(stop, "STOP with a dotted MessageSid", 200,
              signed(form(MessageSid="SM.0001", Body="STOP")),
              rows=1, stored=stop_stored, opted_out=("C-100",)),
+        Case(stop, "STOP with a colon in MessageSid", 200,
+             signed(form(MessageSid="msg:abc", Body="STOP")),
+             rows=1, stored=stop_stored, opted_out=("C-100",)),
+        Case(stop, "STOP with a 65-character MessageSid", 200,
+             signed(form(MessageSid="S" * 65, Body="STOP")),
+             rows=1, stored=stop_stored, opted_out=("C-100",)),
+        Case(stop, "Opt-out fails, so the message is rolled back", 500,
+             signed(form(Body="STOP")), block_opt_out=True),
+        Case(stop, "Retry after a failed opt-out succeeds", 200,
+             signed(form(Body="STOP")) * 2, rows=1, stored=stop_stored, opted_out=("C-100",),
+             block_opt_out=True),
         Case(stop, "STOP from an unmatched number", 200,
              signed(form(From="+15559999999", Body="STOP")),
              rows=1, stored=message(None, claimant=None, dnc=True)),
@@ -178,16 +207,24 @@ def build_cases() -> List[Case]:
              + signed(form(MessageSid="SM2", Body="Thanks")),
              rows=2, stored=message("other"), opted_out=("C-100",), calls=1),
     ]
-    for text in ("STOP please", "don't stop", "stop!", "unsubscribed"):
+    for text in ("STOP please", "don't stop", "stop!", "STOP STOP", "S TOP", "unsubscribed"):
         cases.append(Case(stop, f"Not a keyword: {text!r}", 200, signed(form(Body=text)),
                           rows=1, stored=message("other"), calls=1))
 
     review = message("other", needs_review=True)
-    for answer in ("banana", "", "Status_Question", None, 42, ["other"]):
+    for answer in ("banana", "", "Status_Question", " other", None, 42, ["other"],
+                   {"category": "other"}):
         cases.append(Case(classifier, f"Answer {answer!r}", 200, signed(form()), rows=1,
                           stored=review, calls=1, classifier=SpyClassifier(answer=answer)))
     cases.append(Case(classifier, "Classifier raises an error", 200, signed(form()), rows=1,
                       stored=review, calls=1, classifier=BrokenClassifier()))
+    for category in CATEGORIES:
+        cases.append(Case(classifier, f"Valid answer {category!r}", 200, signed(form()), rows=1,
+                          stored=message(category), calls=1,
+                          classifier=SpyClassifier(answer=category)))
+    cases.append(Case(classifier, "Classifier receives only the Body text", 200,
+                      signed(form(Body="When is my hearing?")), rows=1, calls=1,
+                      classifier_saw=["When is my hearing?"]))
 
     cases += [
         Case(tenancy, "Shared phone matches acme's claimant", 200, signed(form()),
@@ -198,6 +235,8 @@ def build_cases() -> List[Case]:
         Case(tenancy, "Number known only to baker, sent to acme", 200,
              signed(form(From="+15551110003")),
              rows=1, stored=message("other", claimant=None), calls=1),
+        Case(tenancy, "STOP to acme opts out only C-100", 200, signed(form(Body="STOP")),
+             rows=1, stored=message(None, dnc=True), opted_out=("C-100",)),
         Case(tenancy, "STOP to baker opts out only C-200", 200,
              [(baker_stop, sign(baker_stop, BAKER_SECRET))],
              rows=1, stored=message(None, claimant="C-200", dnc=True), opted_out=("C-200",)),
@@ -225,6 +264,18 @@ def deliver_together(app, deliveries):
     return responses
 
 
+def set_opt_out_block(db_path: str, blocked: bool) -> None:
+    statement = (
+        "CREATE TRIGGER block_opt_out BEFORE UPDATE ON claimants "
+        "BEGIN SELECT RAISE(ABORT, 'opt-out failed'); END"
+        if blocked
+        else "DROP TRIGGER block_opt_out"
+    )
+    with closing(connect(db_path)) as conn:
+        conn.execute(statement)
+        conn.commit()
+
+
 def run(case: Case, directory: str, number: int) -> Dict:
     db_path = str(Path(directory) / f"case-{number}.db")
     classifier = case.classifier
@@ -238,7 +289,13 @@ def run(case: Case, directory: str, number: int) -> Dict:
     if case.concurrent:
         responses = deliver_together(app, case.deliveries)
     else:
-        responses = [post(client, body, sig) for body, sig in case.deliveries]
+        responses = []
+        for index, (body, sig) in enumerate(case.deliveries):
+            if case.block_opt_out and index == 0:
+                set_opt_out_block(db_path, True)
+            responses.append(post(client, body, sig))
+            if case.block_opt_out and index == 0:
+                set_opt_out_block(db_path, False)
     if case.get:
         responses.append(client.get(case.get))
     response = responses[-1]
@@ -266,6 +323,12 @@ def run(case: Case, directory: str, number: int) -> Dict:
         checks.append(bool(rows) and all(rows[-1].get(k) == v for k, v in case.stored.items()))
     if case.get_body is not None:
         checks.append(response.json() == case.get_body)
+    if case.same_response:
+        checks.append(len({r.text for r in responses}) == 1)
+    if case.not_in_response:
+        checks.append(case.not_in_response not in response.text)
+    if case.classifier_saw is not None:
+        checks.append(classifier.calls == case.classifier_saw)
 
     return {
         "case": case,
@@ -273,6 +336,7 @@ def run(case: Case, directory: str, number: int) -> Dict:
         "rows": rows,
         "opted_out": opted_out,
         "calls": len(classifier.calls),
+        "inputs": list(classifier.calls),
         "passed": all(checks),
     }
 
