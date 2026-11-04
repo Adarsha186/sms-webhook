@@ -47,8 +47,10 @@ Changing anything here needs the orchestrator's agreement, and both agents must 
   NULL, category TEXT, needs_review INTEGER NOT NULL, UNIQUE(tenant_id, message_sid))`
 
 ### `app/security.py`
-- `parse_form(raw: bytes) -> Dict[str, str]`: raises `ValueError` for undecodable bytes, a repeated field, a missing
-  field, or an empty `MessageSid`, `From` or `To`. An empty `Body` is valid.
+- `InvalidRequest(status: int, code: str, message: str)`: a `ValueError` that the app turns into the JSON error
+  response.
+- `parse_form(raw: bytes) -> Dict[str, str]`: raises `InvalidRequest` for undecodable bytes, a repeated field, a missing
+  field, an empty `MessageSid`, `From` or `To`, or an invalid `MessageSid`, `From` or `To`. An empty `Body` is valid.
 - `verify_signature(raw: bytes, secret: str, signature: Optional[str]) -> bool`: never raises.
 
 ### `app/classifier.py`

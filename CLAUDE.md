@@ -101,6 +101,17 @@ HMAC-SHA256 of the original raw body bytes, keyed with the tenant's secret.
 | Opted-out claimant texts again | Store and classify; flag stays set | The brief defines no way to opt back in |
 | Repeat `MessageSid` with different body | Keep the first version | The first stored delivery wins |
 | Repeat `MessageSid` with bad signature | 403 | Signature checks run before duplicate checks |
+| `MessageSid` format | 1 to 64 of `A-Za-z0-9_-`, else 400 | Unusual characters would break duplicate matching; never trim it |
+| `From`, `To` format | Max 32 characters, no control characters; no phone check | An unknown `To` must reach the 404, and an unmatched `From` is stored |
+| Wrong `Content-Type` | Not rejected | The body decides: a non-form body fails as missing fields |
+| Unknown extra fields | Ignored | Covered by the signature; providers add fields |
+| Body over 16 KB | 413 | Limits what an unauthenticated caller can send |
+
+### Error responses
+
+Every rejection raises `InvalidRequest(status, code, message)`, which returns
+`{"error": {"code": ..., "message": ...}}`. Messages never repeat the caller's input. Missing and wrong signatures
+return an identical response. Checks run in this order: 413, 400, 404, 403.
 
 ## Implementation traps
 
@@ -121,7 +132,7 @@ HMAC-SHA256 of the original raw body bytes, keyed with the tenant's secret.
 - `app/security.py`: `parse_form`, `verify_signature`
 - `app/classifier.py`: `KeywordClassifier`, `safe_classify`
 - `app/ingest.py`: `is_stop`, `process_sms`
-- `tests/`: one file per area (signature, idempotency, tenancy, STOP, classifier, GET), shared fixtures in `conftest.py`
+- `tests/`: `test_happy_path.py`, `test_validation.py` and the `failure_data.py` catalogue so far; more to follow
 
 ## Testing standards
 
@@ -131,3 +142,5 @@ HMAC-SHA256 of the original raw body bytes, keyed with the tenant's secret.
   are 200, with one row and one classifier call.
 - A correctly signed body with different encoding (`%20` rather than `+`, or lowercase `%2b`) must return 200.
 - A spy classifier confirms that it receives only the `Body` text.
+- `tests/failure_data.py` is the catalogue of bad inputs. Add new cases there. Each is correctly signed unless the
+  signature is the defect, so a rejection can only come from the defect the case names.

@@ -9,21 +9,22 @@ requirements are in [`sms-webhook-brief.md`](sms-webhook-brief.md).
 
 ## Status
 
-**This is a working happy path, not a finished feature.** It does not meet the brief yet.
+**Input validation is done, but this is not a finished feature.** STOP handling and classifier failure handling are
+still missing, so it does not meet the brief yet.
 
 | Behaviour | Status |
 |---|---|
 | Signed message is stored, classified and listed | Done |
 | Sender matched within the tenant only; no match stores no claimant | Done |
-| Wrong signature returns 403 and stores nothing | Done |
+| Missing or wrong signature returns 403 and stores nothing | Done |
 | Known tenant with no messages returns `[]` | Done |
-| Missing signature returns 403 | Works, no test yet |
-| Duplicate `MessageSid` returns 200 without reclassifying | **Not built:** returns 500 |
+| Duplicate `MessageSid` returns 200 without reclassifying, including simultaneous deliveries | Done |
+| Missing field returns 400 | Done |
+| Malformed input returns a JSON error, not a 500 | Done |
+| Unknown `To` returns 404 | Done |
+| Unknown tenant on GET returns 404 | Done |
 | `STOP`, `STOPALL`, `UNSUBSCRIBE` opt-out | **Not built:** classified like any other text |
 | Bad classifier answer or error stores `other` for review | **Not built:** a bad answer is stored as the category; an error returns 500 |
-| Missing field returns 400 | **Not built:** returns 500, or 403 if `To` is present and the signature is bad |
-| Unknown `To` returns 404 | **Not built:** returns 500 |
-| Unknown tenant on GET returns 404 | **Not built:** returns `[]` |
 
 ## How to run
 
@@ -65,8 +66,7 @@ curl http://127.0.0.1:8000/tenants/acme-law/messages
 [{"message_sid":"SM0001","claimant_id":"C-100","body":"When is my hearing?","category":"status_question","needs_review":false}]
 ```
 
-Sending the same example twice returns 500 until duplicate handling is built. To start again, stop the server and
-delete `sms.db`, `sms.db-wal` and `sms.db-shm`.
+Sending the same example again returns 200 and stores nothing new. To start again, stop the server and delete `sms.db`, `sms.db-wal` and `sms.db-shm`.
 
 ## API
 
@@ -79,6 +79,29 @@ the hex HMAC-SHA256 of the raw body bytes, keyed with the tenant's secret.
 
 Returns that tenant's messages as a JSON array of `message_sid`, `claimant_id`, `body`, `category` and `needs_review`.
 This route has no authentication, which the brief puts out of scope.
+
+### Errors
+
+Every rejection returns the same JSON shape. Messages never repeat the caller's input, because that input can contain
+phone numbers.
+
+```json
+{"error": {"code": "missing_field", "message": "Body is required."}}
+```
+
+| Status | Code | Meaning |
+|---|---|---|
+| 400 | `missing_field` | A field is absent, or `MessageSid`, `From` or `To` is empty |
+| 400 | `repeated_field` | A required field appears more than once |
+| 400 | `invalid_encoding` | The body is not valid UTF-8 |
+| 400 | `invalid_message_sid` | `MessageSid` isn't 1 to 64 letters, digits, dashes or underscores |
+| 400 | `invalid_from`, `invalid_to` | Over 32 characters, or contains control characters |
+| 403 | `invalid_signature` | The signature is missing or wrong; both get the same response |
+| 404 | `unknown_to` | No tenant uses that number |
+| 404 | `unknown_tenant` | GET for a tenant that doesn't exist |
+| 413 | `request_too_large` | The body is over 16 KB |
+
+Checks run in that order: 413, then 400, then 404, then 403. None of them writes anything.
 
 ## How it works
 
@@ -117,17 +140,17 @@ Each decision started from a way the system could fail. The brief's requirements
 | Inject the classifier through `create_app(db_path, classifier)` | Tests can't replace it, so failure paths can't be exercised |
 | Run database work in a threadpool | Blocking calls in an `async` route process requests one at a time, which would also let a race test pass without proving anything |
 | Open one SQLite connection per call, using WAL and a busy timeout | Connections shared across threads fail, and simultaneous writers fail immediately rather than waiting |
+| Let the database decide duplicates, using `INSERT ... ON CONFLICT DO NOTHING` and checking the row count | Two simultaneous deliveries both pass a select-then-insert check, and both call the classifier |
+| Reject a `MessageSid` with spaces or other unusual characters rather than trimming it | `SM1` and `SM1 ` count as different messages, so a retry slips past the duplicate check |
+| Give missing and wrong signatures an identical response | The response reveals how close a forged request came |
+| Keep error messages free of the caller's input | Phone numbers leak into responses and logs |
 
 ### Planned
 
 | Decision | The failure it prevents |
 |---|---|
-| Let the database decide duplicates, using `INSERT ... ON CONFLICT DO NOTHING` and checking the row count | Two simultaneous deliveries both pass a select-then-insert check, and both call the classifier |
 | Save a STOP message and its opt-out in one transaction | If only the message saves, the retry looks like a duplicate and the claimant is never opted out |
 | Treat any invalid classifier answer as `other` with `needs_review` true | Bad output reaches stored data as if it were a real category |
-
-The `UNIQUE(tenant_id, message_sid)` constraint is already in the schema, which is why a duplicate currently fails
-with a 500 rather than storing a second row.
 
 ### Where the brief was silent
 
@@ -141,8 +164,13 @@ These were judgment calls, chosen to be strict and predictable:
 | `STOP please`, `don't stop` | Classify normally | Only an exact keyword after stripping is an opt-out |
 | Opted-out claimant texts again | Store and classify; the flag stays set | The brief defines no way to opt back in |
 | Repeat `MessageSid` with a different body | Keep the first | The first stored delivery wins |
+| `MessageSid` format | 1 to 64 letters, digits, dashes or underscores | Allows the brief's `SM0001` and common provider IDs, and blocks values that break duplicate matching |
+| `From` and `To` format | No phone-number check; only length and control characters | The brief wants an unknown `To` to return 404 and an unmatched `From` to be stored, and senders can be short codes |
+| Wrong `Content-Type` | Not rejected | The body decides: a non-form body fails as missing fields |
+| Unknown extra fields | Ignored | They are covered by the signature, and providers often add fields |
+| Body over 16 KB | 413 | Far above any SMS, and limits what an unauthenticated caller can send |
 
-None of these is built yet except where the status table says so. `CLAUDE.md` has the full list.
+The two STOP rows aren't built yet; the rest are. `CLAUDE.md` has the full list.
 
 ## How it was built
 
@@ -163,6 +191,7 @@ agents, so its tests are not yet an independent check of the code.
 ## Known limitations
 
 - Secrets are stored in plain text in SQLite. That's acceptable for synthetic fixtures only.
+- The 16 KB limit is checked after the body is read, so it doesn't stop a very large upload reaching memory.
 - Importing `app.main` creates `sms.db`, including during tests. Git ignores it.
 - If a process crashes between storing and classifying, the message stays as `other` for review and is not retried.
 

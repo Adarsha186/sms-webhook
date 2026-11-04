@@ -13,10 +13,15 @@ def process_sms(db_path: str, classifier, tenant_id: str, form: Dict[str, str]) 
         cursor = conn.execute(
             "INSERT INTO messages "
             "(tenant_id, message_sid, claimant_id, body, category, needs_review) "
-            "VALUES (?, ?, ?, ?, 'other', 1)",
+            "VALUES (?, ?, ?, ?, 'other', 1) "
+            "ON CONFLICT (tenant_id, message_sid) DO NOTHING",
             (tenant_id, form["MessageSid"], claimant_id, form["Body"]),
         )
         conn.commit()
+
+        # The database picks one winner; every other delivery is a repeat.
+        if cursor.rowcount == 0:
+            return
 
         category = classifier.classify(form["Body"])
 

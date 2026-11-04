@@ -62,6 +62,10 @@ def get_tenant_by_number(conn, number: str) -> Optional[sqlite3.Row]:
     return conn.execute("SELECT * FROM tenants WHERE number = ?", (number,)).fetchone()
 
 
+def get_tenant(conn, tenant_id: str) -> Optional[sqlite3.Row]:
+    return conn.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+
+
 def find_claimant(conn, tenant_id: str, phone: str) -> Optional[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM claimants WHERE tenant_id = ? AND phone = ?",
