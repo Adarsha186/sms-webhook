@@ -12,8 +12,7 @@ requirements are in [`sms-webhook-brief.md`](sms-webhook-brief.md).
 **The brief's requirements are built and independently reviewed, with two rejection edge cases still open.** The review
 found five issues: two are fixed and three are pending. All 231 tests pass, and
 [`docs/test-report.md`](docs/test-report.md) records 120 cases with their requests and responses. Each recorded case
-also runs as a test. Nothing has been
-pushed to GitHub yet.
+also runs as a test.
 
 ### Working end to end
 
@@ -56,7 +55,6 @@ The review's fixes haven't been re-reviewed.
 | `dnc` meaning | It describes the message, so a later message from an opted-out claimant shows `false`. Needs a decision on whether it should follow the claimant |
 | One `UPDATE` has no `tenant_id` filter | `app/ingest.py` uses a row ID from the same insert, so no failure is possible today. A one-line safeguard |
 | Tests aren't independent | They were written in the same session as the code. `test-writer` should check coverage from the brief |
-| Push to GitHub | Needs a repository name and visibility |
 
 ## How to run
 
