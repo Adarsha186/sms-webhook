@@ -1,0 +1,10 @@
+.venv/
+.sf/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.db-shm
+*.db-wal
+.claude/settings.local.json
+.DS_Store
