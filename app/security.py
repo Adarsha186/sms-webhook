@@ -9,8 +9,9 @@ NON_EMPTY_FIELDS = ("MessageSid", "From", "To")
 
 # Deliberately loose: the brief gives no format, and rejecting a signed message
 # loses it. This only blocks values that can't be a stable identifier, including
-# the replacement character: two different undecodable IDs would look identical.
-MESSAGE_SID = re.compile(r"[^\s\x00-\x1f\x7f\ufffd]{1,255}")
+# undecodable bytes (held as surrogates by parse_form), because two different
+# undecodable IDs would look identical once replaced.
+MESSAGE_SID = re.compile(r"[^\s\x00-\x1f\x7f\ud800-\udfff]{1,255}")
 
 
 class InvalidRequest(ValueError):
@@ -24,9 +25,10 @@ class InvalidRequest(ValueError):
 
 
 def parse_form(raw: bytes) -> Dict[str, str]:
-    # Undecodable bytes become replacement characters rather than a rejection, so
-    # a signed message is never lost. The signature still covers the raw bytes.
-    parsed = parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True)
+    # Hold undecodable bytes as surrogates so MessageSid can tell them from a real
+    # replacement character. The signature still covers the raw bytes.
+    text = raw.decode("utf-8", "surrogateescape")
+    parsed = parse_qs(text, keep_blank_values=True, errors="surrogateescape")
 
     for field in REQUIRED_FIELDS:
         if len(parsed.get(field, [])) > 1:
@@ -36,7 +38,15 @@ def parse_form(raw: bytes) -> Dict[str, str]:
     for field in REQUIRED_FIELDS:
         if form[field] is None or (field in NON_EMPTY_FIELDS and not form[field]):
             raise InvalidRequest(400, "missing_field", f"{field} is required.")
+
+    # Other fields keep the message: undecodable bytes become replacement characters.
+    for field in ("From", "To", "Body"):
+        form[field] = _replace_undecodable(form[field])
     return form
+
+
+def _replace_undecodable(text: str) -> str:
+    return text.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
 
 
 def validate_message_sid(message_sid: str) -> None:

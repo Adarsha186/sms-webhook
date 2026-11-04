@@ -49,8 +49,8 @@ Changing anything here needs the orchestrator's agreement, and both agents must 
 ### `app/security.py`
 - `InvalidRequest(status: int, code: str, message: str)`: a `ValueError` that the app turns into the JSON error
   response.
-- `parse_form(raw: bytes) -> Dict[str, str]`: raises `InvalidRequest` for undecodable bytes, a repeated field, a missing
-  field, or an empty `MessageSid`, `From` or `To`. An empty `Body` is valid.
+- `parse_form(raw: bytes) -> Dict[str, str]`: raises `InvalidRequest` for a repeated field, a missing field, or an empty
+  `MessageSid`, `From` or `To`. Undecodable bytes in `From`, `To` and `Body` become replacement characters. An empty `Body` is valid.
 - `validate_message_sid(message_sid: str) -> None`: raises `InvalidRequest`. Runs after the signature check.
 - `verify_signature(raw: bytes, secret: str, signature: Optional[str]) -> bool`: never raises.
 
@@ -79,6 +79,8 @@ read `SELECT opted_out FROM claimants WHERE id = ?` through `connect` for the fl
 Commit after each task that leaves the suite no worse than before.
 
 ## Tests
+
+This is the original test list. The final files are in `tests/`, grouped differently.
 
 Items marked ★ are required by the brief. Every rejection test also asserts no rows were written and the classifier
 was not called.

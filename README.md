@@ -9,7 +9,7 @@ requirements are in [`sms-webhook-brief.md`](sms-webhook-brief.md).
 
 ## Status
 
-**The brief's requirements are built and independently reviewed.** The review found five issues, and all five are fixed. All 247 tests pass, and
+**The brief's requirements are built and independently reviewed.** The review found five issues, and all five are fixed. All 343 tests pass, and
 [`docs/test-report.md`](docs/test-report.md) records 126 cases with their requests and responses. Each recorded case
 also runs as a test.
 
@@ -42,13 +42,11 @@ tested through the app. The first two, plus a duplicate and a forged STOP, were 
 | 6 | GET route | Built, with the added `dnc` field |
 | 7 | Required tests | Built |
 
-The review's fixes haven't been re-reviewed.
+The review's fixes haven't been re-reviewed by that agent, but the independent coverage check ran against them.
 
 ### Pending
 
-| Item | Why it's open |
-|---|---|
-| Tests aren't independent | They were written in the same session as the code. `test-writer` should check coverage from the brief |
+Nothing from the review or the coverage check is open. Remaining limits are under Known limitations.
 
 ## How to run
 
@@ -215,8 +213,8 @@ This project was built by directing coding agents, as the brief requires.
 - **Permissions:** `.claude/settings.json` keeps agents inside the repository, sandboxes shell commands, blocks web
   access, and requires approval for pushes. Agents can't edit these settings.
 
-The code so far was written test-first in the main session, not by the separate `builder` and `test-writer` agents, so
-its tests are not yet an independent check of the code.
+The application code was written test-first in the main session, not by the separate `builder` agent. Independent checks
+came from separate agents: the review below, and the coverage check after it.
 
 ### Independent review
 
@@ -232,6 +230,19 @@ made:
 | 3 | The race test misses a select-then-insert regression 13 times in 30 | Fixed. Deliveries now wait at a barrier just before the insert, over 20 rounds, and the test caught the regression in 30 of 30 runs |
 | 4 | The size limit and non-UTF-8 rejection lose messages | Fixed. The limit is gone, and undecodable text is stored with replacement characters |
 | 5 | One `UPDATE` has no `tenant_id` filter | Fixed |
+
+### Independent coverage check
+
+A separate agent following `.claude/agents/test-writer.md` mapped each requirement to its tests without reading `app/`,
+then added `tests/test_independent_coverage.py` (96 cases) for the gaps. It found one defect: a signed `MessageSid`
+containing a genuine replacement character was rejected, because the rule couldn't tell it from undecodable bytes. That
+is fixed, and the test was not changed.
+
+Mutation runs on the new tests: replacing the claimant seeds and classifying inside an open transaction each fail a
+test. Removing the `tenant_id` filter from the classifier `UPDATE` fails nothing, because the row ID always comes from
+the same insert. That filter is a safeguard for future changes, and no test proves it.
+
+### Protections shown to work
 
 Three protections have been shown to fail their tests when removed: splitting the STOP transaction fails the rollback
 test, letting STOP skip the signature check fails the forged-STOP cases, and select-then-insert fails the race test.

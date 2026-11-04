@@ -7,7 +7,7 @@ Generated on 2026-11-04 by `scripts/generate_test_report.py`. Don't edit this fi
 | Run | Total | Passed | Failed |
 |---|---|---|---|
 | Recorded cases (below) | 126 | 126 | 0 |
-| pytest suite | 247 | 247 | 0 |
+| pytest suite | 343 | 343 | 0 |
 
 Each recorded case runs against the real app with a fresh database. A case passes only if its status, error code, stored row, opt-outs and classifier calls all match. Every rejected case is also checked for no stored rows, no opt-outs and no classifier call.
 
@@ -15,6 +15,7 @@ Each recorded case runs against the real app with a fresh database. A case passe
 |---|---|---|
 | `tests.test_classifier` | 15 | 0 |
 | `tests.test_happy_path` | 9 | 0 |
+| `tests.test_independent_coverage` | 96 | 0 |
 | `tests.test_report_cases` | 126 | 0 |
 | `tests.test_stop` | 28 | 0 |
 | `tests.test_validation` | 69 | 0 |
