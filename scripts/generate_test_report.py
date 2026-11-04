@@ -452,7 +452,7 @@ REFERENCE = """## Request and response fields
 | `MessageSid` | Form body | Required. 1 to 255 characters, no spaces or control characters |
 | `From` | Form body | Required, not empty. No format check |
 | `To` | Form body | Required, not empty. Must be a tenant's number |
-| `Body` | Form body | Required, may be empty |
+| `Body` | Form body | Required, may be empty. Undecodable bytes become replacement characters |
 | `X-Signature` | Header | Lowercase hex HMAC-SHA256 of the raw body, keyed with the tenant's secret |
 
 ### `POST /webhooks/sms` response
@@ -476,10 +476,9 @@ Every rejection returns `{"error": {"code": ..., "message": ...}}`.
 
 | Status | `code` |
 |---|---|
-| 400 | `missing_field`, `repeated_field`, `invalid_encoding`, `invalid_message_sid` |
+| 400 | `missing_field`, `repeated_field`, `invalid_message_sid` |
 | 403 | `invalid_signature` |
 | 404 | `unknown_to`, `unknown_tenant` |
-| 413 | `request_too_large` |
 """
 
 NOT_COVERED = """## What this report does not cover
@@ -488,8 +487,8 @@ NOT_COVERED = """## What this report does not cover
 - **Load:** the simultaneous cases use two deliveries, not sustained traffic.
 - **Crash recovery:** a process dying mid-request isn't simulated here. The rollback of a failed
   opt-out is covered in `tests/test_stop.py`.
-- **Race strength:** the simultaneous cases show the current code behaves correctly. The review
-  found this kind of test doesn't reliably catch a select-then-insert regression.
+- **Race strength:** these recorded simultaneous cases only show the code behaves correctly. The
+  regression check is in `tests/test_validation.py`, which holds deliveries at a barrier.
 """
 
 

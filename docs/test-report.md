@@ -6,8 +6,8 @@ Generated on 2026-11-04 by `scripts/generate_test_report.py`. Don't edit this fi
 
 | Run | Total | Passed | Failed |
 |---|---|---|---|
-| Recorded cases (below) | 122 | 122 | 0 |
-| pytest suite | 236 | 236 | 0 |
+| Recorded cases (below) | 126 | 126 | 0 |
+| pytest suite | 247 | 247 | 0 |
 
 Each recorded case runs against the real app with a fresh database. A case passes only if its status, error code, stored row, opt-outs and classifier calls all match. Every rejected case is also checked for no stored rows, no opt-outs and no classifier call.
 
@@ -15,9 +15,9 @@ Each recorded case runs against the real app with a fresh database. A case passe
 |---|---|---|
 | `tests.test_classifier` | 15 | 0 |
 | `tests.test_happy_path` | 9 | 0 |
-| `tests.test_report_cases` | 122 | 0 |
+| `tests.test_report_cases` | 126 | 0 |
 | `tests.test_stop` | 28 | 0 |
-| `tests.test_validation` | 62 | 0 |
+| `tests.test_validation` | 69 | 0 |
 
 ## Request and response fields
 
@@ -28,7 +28,7 @@ Each recorded case runs against the real app with a fresh database. A case passe
 | `MessageSid` | Form body | Required. 1 to 255 characters, no spaces or control characters |
 | `From` | Form body | Required, not empty. No format check |
 | `To` | Form body | Required, not empty. Must be a tenant's number |
-| `Body` | Form body | Required, may be empty |
+| `Body` | Form body | Required, may be empty. Undecodable bytes become replacement characters |
 | `X-Signature` | Header | Lowercase hex HMAC-SHA256 of the raw body, keyed with the tenant's secret |
 
 ### `POST /webhooks/sms` response
@@ -52,10 +52,9 @@ Every rejection returns `{"error": {"code": ..., "message": ...}}`.
 
 | Status | `code` |
 |---|---|
-| 400 | `missing_field`, `repeated_field`, `invalid_encoding`, `invalid_message_sid` |
+| 400 | `missing_field`, `repeated_field`, `invalid_message_sid` |
 | 403 | `invalid_signature` |
 | 404 | `unknown_to`, `unknown_tenant` |
-| 413 | `request_too_large` |
 
 ## Cases
 
@@ -91,7 +90,7 @@ Status shows expected / actual. For a case with several deliveries, the request 
 | empty-to | `SM1000` | `+15551110001` | (empty) | `Hello` | valid (acme) | 400 / 400 | `{"error":{"code":"missing_field","message":"To is required."}}` | nothing | none | 0 | PASS |
 | missing-field-unsigned | `SM1000` | `+15551110001` | `+15550000001` | (missing) | (missing) | 400 / 400 | `{"error":{"code":"missing_field","message":"Body is required."}}` | nothing | none | 0 | PASS |
 
-### 3. Invalid MessageSid (8 of 8 passed)
+### 3. Invalid MessageSid (9 of 9 passed)
 
 | Case | MessageSid | From | To | Body | X-Signature | Status | Response body | Stored | Opted out | Calls | Result |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -101,19 +100,18 @@ Status shows expected / actual. For a case with several deliveries, the request 
 | sid-trailing-space | `SM1 ` | `+15551110001` | `+15550000001` | `Hello` | valid (acme) | 400 / 400 | `{"error":{"code":"invalid_message_sid","message":"MessageSid must be 1 to 255 ch...` | nothing | none | 0 | PASS |
 | sid-trailing-newline | `SM1\n` | `+15551110001` | `+15550000001` | `Hello` | valid (acme) | 400 / 400 | `{"error":{"code":"invalid_message_sid","message":"MessageSid must be 1 to 255 ch...` | nothing | none | 0 | PASS |
 | sid-nul-byte | `SM\x001` | `+15551110001` | `+15550000001` | `Hello` | valid (acme) | 400 / 400 | `{"error":{"code":"invalid_message_sid","message":"MessageSid must be 1 to 255 ch...` | nothing | none | 0 | PASS |
+| sid-undecodable | `SM�1` | `+15551110001` | `+15550000001` | `Hello` | valid (acme) | 400 / 400 | `{"error":{"code":"invalid_message_sid","message":"MessageSid must be 1 to 255 ch...` | nothing | none | 0 | PASS |
 | sid-too-long | `SSSSSSSSSSSSSSSSSSSS... (256 chars)` | `+15551110001` | `+15550000001` | `Hello` | valid (acme) | 400 / 400 | `{"error":{"code":"invalid_message_sid","message":"MessageSid must be 1 to 255 ch...` | nothing | none | 0 | PASS |
 | sid-sql-text | `SM1'; DROP TABLE messages;--` | `+15551110001` | `+15550000001` | `Hello` | valid (acme) | 400 / 400 | `{"error":{"code":"invalid_message_sid","message":"MessageSid must be 1 to 255 ch...` | nothing | none | 0 | PASS |
 
-### 4. Malformed bodies (6 of 6 passed)
+### 4. Malformed bodies (4 of 4 passed)
 
 | Case | MessageSid | From | To | Body | X-Signature | Status | Response body | Stored | Opted out | Calls | Result |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Control: same reques... (40 chars) | `SM1000` | `+15551110001` | `+15550000001` | `Hello` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 | repeated-to | `SM1000` | `+15551110001` | `+15550000001` and `+15550000002` | `Hello` | valid (acme) | 400 / 400 | `{"error":{"code":"repeated_field","message":"To appears more than once."}}` | nothing | none | 0 | PASS |
 | repeated-sid | `SM1000` and `SM2` | `+15551110001` | `+15550000001` | `Hello` | valid (acme) | 400 / 400 | `{"error":{"code":"repeated_field","message":"MessageSid appears more than once."}}` | nothing | none | 0 | PASS |
-| raw-invalid-utf8 | (missing) | (missing) | (missing) | (missing) | valid (acme) | 400 / 400 | `{"error":{"code":"invalid_encoding","message":"The body is not valid UTF-8."}}` | nothing | none | 0 | PASS |
-| percent-encoded-invalid-utf8 | `SM1000` | `+15551110001` | `+15550000001` | `�` | valid (acme) | 400 / 400 | `{"error":{"code":"invalid_encoding","message":"The body is not valid UTF-8."}}` | nothing | none | 0 | PASS |
-| request-too-large | `SM1000` | `+15551110001` | `+15550000001` | `xxxxxxxxxxxxxxxxxxxx... (20000 chars)` | valid (acme) | 413 / 413 | `{"error":{"code":"request_too_large","message":"The body is too large."}}` | nothing | none | 0 | PASS |
+| undecodable-bytes-with-no-fields | (missing) | (missing) | (missing) | (missing) | valid (acme) | 400 / 400 | `{"error":{"code":"missing_field","message":"MessageSid is required."}}` | nothing | none | 0 | PASS |
 
 ### 5. Unknown To (7 of 7 passed)
 
@@ -127,7 +125,7 @@ Status shows expected / actual. For a case with several deliveries, the request 
 | to-control-character | `SM1000` | `+15551110001` | `+1555\n` | `Hello` | valid (acme) | 404 / 404 | `{"error":{"code":"unknown_to","message":"No tenant uses that number."}}` | nothing | none | 0 | PASS |
 | Error does not repea... (42 chars) | `SM1000` | `+15557654321` | `+15559999999` | `Hello` | valid (acme) | 404 / 404 | `{"error":{"code":"unknown_to","message":"No tenant uses that number."}}` | nothing | none | 0 | PASS |
 
-### 6. Bad signatures (15 of 15 passed)
+### 6. Bad signatures (17 of 17 passed)
 
 | Case | MessageSid | From | To | Body | X-Signature | Status | Response body | Stored | Opted out | Calls | Result |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -141,13 +139,15 @@ Status shows expected / actual. For a case with several deliveries, the request 
 | signature-non-ascii | `SM1000` | `+15551110001` | `+15550000001` | `Hello` | `b'\xff\xfe'` | 403 / 403 | `{"error":{"code":"invalid_signature","message":"The signature is not valid."}}` | nothing | none | 0 | PASS |
 | signature-other-tenant | `SM1000` | `+15551110001` | `+15550000001` | `Hello` | valid (baker) | 403 / 403 | `{"error":{"code":"invalid_signature","message":"The signature is not valid."}}` | nothing | none | 0 | PASS |
 | signature-for-other-body | `SM1000` | `+15551110001` | `+15550000001` | `Tampered` | `f3814f4f836f1a38c059... (64 chars)` | 403 / 403 | `{"error":{"code":"invalid_signature","message":"The signature is not valid."}}` | nothing | none | 0 | PASS |
+| large-body-unsigned | `SM1000` | `+15551110001` | `+15550000001` | `xxxxxxxxxxxxxxxxxxxx... (20000 chars)` | (missing) | 403 / 403 | `{"error":{"code":"invalid_signature","message":"The signature is not valid."}}` | nothing | none | 0 | PASS |
+| undecodable-body-unsigned | `SM1000` | `+15551110001` | `+15550000001` | `caf�` | (missing) | 403 / 403 | `{"error":{"code":"invalid_signature","message":"The signature is not valid."}}` | nothing | none | 0 | PASS |
 | bad-sid-unsigned | `SM 1` | `+15551110001` | `+15550000001` | `Hello` | (missing) | 403 / 403 | `{"error":{"code":"invalid_signature","message":"The signature is not valid."}}` | nothing | none | 0 | PASS |
 | forged-stop-unsigned | `SM1000` | `+15551110001` | `+15550000001` | `STOP` | (missing) | 403 / 403 | `{"error":{"code":"invalid_signature","message":"The signature is not valid."}}` | nothing | none | 0 | PASS |
 | forged-stop-wrong | `SM1000` | `+15551110001` | `+15550000001` | `STOP` | `00000000000000000000... (64 chars)` | 403 / 403 | `{"error":{"code":"invalid_signature","message":"The signature is not valid."}}` | nothing | none | 0 | PASS |
 | forged-stop-other-tenant | `SM1000` | `+15551110001` | `+15550000001` | `STOP` | valid (baker) | 403 / 403 | `{"error":{"code":"invalid_signature","message":"The signature is not valid."}}` | nothing | none | 0 | PASS |
 | Missing and wrong si... (67 chars) | `SM1000` | `+15551110001` | `+15550000001` | `Hello` | `00000000000000000000... (64 chars)` | 403 / 403 | `{"error":{"code":"invalid_signature","message":"The signature is not valid."}}` | nothing | none | 0 | PASS |
 
-### 7. Unusual but valid input (14 of 14 passed)
+### 7. Unusual but valid input (17 of 17 passed)
 
 | Case | MessageSid | From | To | Body | X-Signature | Status | Response body | Stored | Opted out | Calls | Result |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -159,6 +159,9 @@ Status shows expected / actual. For a case with several deliveries, the request 
 | very-long-sender | `SM1000` | `+1+1+1+1+1+1+1+1+1+1... (40 chars)` | `+15550000001` | `Hello` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=None, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 | sender-with-control-character | `SM1000` | `+1555\x00` | `+15550000001` | `Hello` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=None, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 | empty-message-body | `SM1000` | `+15551110001` | `+15550000001` | (empty) | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | none | 1 | PASS |
+| very-long-message-body | `SM1000` | `+15551110001` | `+15550000001` | `xxxxxxxxxxxxxxxxxxxx... (20000 chars)` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | none | 1 | PASS |
+| percent-encoded-undecodable-body | `SM1000` | `+15551110001` | `+15550000001` | `caf�` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | none | 1 | PASS |
+| raw-undecodable-body | `SM1000` | `+15551110001` | `+15550000001` | `caf�` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 | short-code-sender | `SM1000` | `12345` | `+15550000001` | `Hello` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=None, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 | unknown-sender-text | `SM1000` | `unknown` | `+15550000001` | `Hello` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=None, category=other, needs_review=False, dnc=False | none | 1 | PASS |
 | non-ascii-message-body | `SM1000` | `+15551110001` | `+15550000001` | `Héllo ✓` | valid (acme) | 200 / 200 | (empty) | 1 row(s); last: claimant=C-100, category=other, needs_review=False, dnc=False | none | 1 | PASS |
@@ -244,5 +247,5 @@ Status shows expected / actual. For a case with several deliveries, the request 
 - **Load:** the simultaneous cases use two deliveries, not sustained traffic.
 - **Crash recovery:** a process dying mid-request isn't simulated here. The rollback of a failed
   opt-out is covered in `tests/test_stop.py`.
-- **Race strength:** the simultaneous cases show the current code behaves correctly. The review
-  found this kind of test doesn't reliably catch a select-then-insert regression.
+- **Race strength:** these recorded simultaneous cases only show the code behaves correctly. The
+  regression check is in `tests/test_validation.py`, which holds deliveries at a barrier.

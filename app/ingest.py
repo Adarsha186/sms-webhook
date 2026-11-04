@@ -61,7 +61,8 @@ def _store_and_classify(
     category, needs_review = safe_classify(classifier, form["Body"])
 
     conn.execute(
-        "UPDATE messages SET category = ?, needs_review = ? WHERE id = ?",
-        (category, int(needs_review), cursor.lastrowid),
+        "UPDATE messages SET category = ?, needs_review = ? "
+        "WHERE id = ? AND tenant_id = ?",
+        (category, int(needs_review), cursor.lastrowid, tenant_id),
     )
     conn.commit()

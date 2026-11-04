@@ -9,9 +9,8 @@ requirements are in [`sms-webhook-brief.md`](sms-webhook-brief.md).
 
 ## Status
 
-**The brief's requirements are built and independently reviewed, with two rejection edge cases still open.** The review
-found five issues: two are fixed and three are pending. All 236 tests pass, and
-[`docs/test-report.md`](docs/test-report.md) records 122 cases with their requests and responses. Each recorded case
+**The brief's requirements are built and independently reviewed.** The review found five issues, and all five are fixed. All 247 tests pass, and
+[`docs/test-report.md`](docs/test-report.md) records 126 cases with their requests and responses. Each recorded case
 also runs as a test.
 
 ### Working end to end
@@ -35,7 +34,7 @@ tested through the app. The first two, plus a duplicate and a forged STOP, were 
 
 | # | Requirement | Status |
 |---|---|---|
-| 1 | Validation order and status codes | Built, except the two open rejections under Pending |
+| 1 | Validation order and status codes | Built |
 | 2 | Idempotent delivery | Built |
 | 3 | Claimant matching within the tenant | Built |
 | 4 | STOP opt-out | Built |
@@ -49,10 +48,6 @@ The review's fixes haven't been re-reviewed.
 
 | Item | Why it's open |
 |---|---|
-| Body over 16 KB returns 413 | The brief has no size limit, so a large signed message is lost, and an unsigned one gets 413 rather than 403. Needs a decision: keep the limit or remove it |
-| Signed `Body` that isn't valid UTF-8 returns 400 | The message is lost. Needs a decision: reject it, or store it with replacement characters |
-| Race test is unreliable | It missed a select-then-insert regression in 13 of 30 runs. The code itself passed; the test needs a tighter barrier |
-| One `UPDATE` has no `tenant_id` filter | `app/ingest.py` uses a row ID from the same insert, so no failure is possible today. A one-line safeguard |
 | Tests aren't independent | They were written in the same session as the code. `test-writer` should check coverage from the brief |
 
 ## How to run
@@ -130,14 +125,12 @@ phone numbers.
 |---|---|---|
 | 400 | `missing_field` | A field is absent, or `MessageSid`, `From` or `To` is empty |
 | 400 | `repeated_field` | A required field appears more than once |
-| 400 | `invalid_encoding` | The body is not valid UTF-8 |
-| 400 | `invalid_message_sid` | `MessageSid` is over 255 characters, or contains spaces or control characters |
+| 400 | `invalid_message_sid` | `MessageSid` is over 255 characters, or contains spaces, control characters or undecodable bytes |
 | 403 | `invalid_signature` | The signature is missing or wrong; both get the same response |
 | 404 | `unknown_to` | No tenant uses that number |
 | 404 | `unknown_tenant` | GET for a tenant that doesn't exist |
-| 413 | `request_too_large` | The body is over 16 KB |
 
-Checks run in this order: 413, missing or malformed input (400), 404, 403, then `MessageSid` format (400). None of them
+Checks run in this order: missing or repeated fields (400), 404, 403, then `MessageSid` format (400). None of them
 writes anything. The format check runs last so it can't replace a 403 or 404 the brief requires.
 
 ## How it works
@@ -203,7 +196,9 @@ These were judgment calls, chosen to be strict and predictable:
 | `From` and `To` format | Not checked, beyond being present and not empty | The brief wants an unknown `To` to return 404 and an unmatched `From` to be stored, and senders can be short codes |
 | Wrong `Content-Type` | Not rejected | The body decides: a non-form body fails as missing fields |
 | Unknown extra fields | Ignored | They are covered by the signature, and providers often add fields |
-| Body over 16 KB | 413 | Far above any SMS, and limits what an unauthenticated caller can send |
+| Very large body | Accepted | The brief sets no limit, and a limit could lose a signed message |
+| `Body` that isn't valid UTF-8 | Stored with replacement characters | A signed message is never lost; the signature still covers the original bytes |
+| `MessageSid` that isn't valid UTF-8 | 400, after the signature check | Two different IDs would look identical, so the second would be dropped as a duplicate |
 
 `CLAUDE.md` has the full list.
 
@@ -227,23 +222,24 @@ its tests are not yet an independent check of the code.
 
 An agent that didn't write the code reviewed it against the brief, running as a read-only `Plan` agent that followed
 `.claude/agents/reviewer.md`, because that definition hadn't loaded in the session. The brief allows acting on up to two
-findings:
+findings during the exercise. Findings 1 and 2 were fixed first, and the rest followed once the product decisions were
+made:
 
 | # | Finding | Decision |
 |---|---|---|
 | 1 | Format checks rejected messages the brief requires, including signed STOPs | Fixed. The tests that asserted this were wrong, because they required a 400 where the brief requires a 200, 403 or 404 |
 | 2 | No test covered a forged STOP | Fixed. Putting a STOP signature bypass back in now fails exactly the three new cases |
-| 3 | The race test misses a select-then-insert regression 13 times in 30 | Pending. The production code passed |
-| 4 | The size limit and non-UTF-8 rejection lose messages | Pending. Needs a decision |
-| 5 | One `UPDATE` has no `tenant_id` filter | Pending. No failure is possible today |
+| 3 | The race test misses a select-then-insert regression 13 times in 30 | Fixed. Deliveries now wait at a barrier just before the insert, over 20 rounds, and the test caught the regression in 30 of 30 runs |
+| 4 | The size limit and non-UTF-8 rejection lose messages | Fixed. The limit is gone, and undecodable text is stored with replacement characters |
+| 5 | One `UPDATE` has no `tenant_id` filter | Fixed |
 
-Two tests have been shown to fail when their protection is removed: splitting the STOP transaction fails the rollback
-test, and letting STOP skip the signature check fails the forged-STOP cases.
+Three protections have been shown to fail their tests when removed: splitting the STOP transaction fails the rollback
+test, letting STOP skip the signature check fails the forged-STOP cases, and select-then-insert fails the race test.
 
 ## Known limitations
 
 - Secrets are stored in plain text in SQLite. That's acceptable for synthetic fixtures only.
-- The 16 KB limit is checked after the body is read, so it doesn't stop a very large upload reaching memory.
+- There is no body size limit, so a very large request reaches memory. In production, set one at the proxy.
 - A STOP from an unmatched number has no claimant to carry the flag, so only that STOP shows `dnc: true`. Later messages
   from the same number show `false`.
 - A STOP reusing an already stored `MessageSid` returns 200 without opting out, under the "first delivery wins" rule.

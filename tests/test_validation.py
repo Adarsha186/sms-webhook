@@ -4,6 +4,7 @@ from contextlib import closing
 import pytest
 from fastapi.testclient import TestClient
 
+from app import ingest
 from app.db import connect
 from app.main import create_app
 from failure_data import (
@@ -101,23 +102,71 @@ def test_same_message_sid_is_stored_once_in_each_tenant(client):
     assert len(stored(client, "baker-llp")) == 1
 
 
-def test_simultaneous_deliveries_store_one_row_and_classify_once(tmp_path):
-    slow_spy = SpyClassifier(delay=0.2)
-    app = create_app(str(tmp_path / "race.db"), slow_spy)
+@pytest.mark.parametrize(
+    "body", [b"Body=caf%E9", b"Body=caf\xe9"], ids=["percent-encoded", "raw"]
+)
+def test_undecodable_text_is_stored_with_a_replacement_character(client, spy, body):
+    response = post(client, form().replace(b"Body=Hello", body), SIGN_WITH_ACME)
+
+    assert response.status_code == 200
+    assert stored(client)[0]["body"] == "caf\ufffd"
+    assert spy.calls == ["caf\ufffd"]
+
+
+RACE_ROUNDS = 20
+
+
+def deliver_in_pairs(monkeypatch, app, bodies):
+    """Deliver each body twice, holding both deliveries just before the insert."""
     barrier = threading.Barrier(2)
+    real_find_claimant = ingest.find_claimant
+
+    def find_claimant_then_wait(conn, tenant_id, phone):
+        claimant = real_find_claimant(conn, tenant_id, phone)
+        barrier.wait(timeout=5)
+        return claimant
+
+    monkeypatch.setattr(ingest, "find_claimant", find_claimant_then_wait)
     statuses = []
 
-    def deliver():
+    def deliver(body):
         client = TestClient(app, raise_server_exceptions=False)
-        barrier.wait()
-        statuses.append(post(client, form(), SIGN_WITH_ACME).status_code)
+        statuses.append(post(client, body, SIGN_WITH_ACME).status_code)
 
-    threads = [threading.Thread(target=deliver) for _ in range(2)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    for body in bodies:
+        threads = [threading.Thread(target=deliver, args=(body,)) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    return statuses
 
-    assert statuses == [200, 200]
-    assert len(stored(TestClient(app))) == 1
-    assert len(slow_spy.calls) == 1
+
+def test_simultaneous_deliveries_store_one_row_and_classify_once(
+    tmp_path, monkeypatch
+):
+    spy = SpyClassifier()
+    app = create_app(str(tmp_path / "race.db"), spy)
+    bodies = [form(MessageSid=f"SM{i}") for i in range(RACE_ROUNDS)]
+
+    statuses = deliver_in_pairs(monkeypatch, app, bodies)
+
+    assert statuses == [200] * RACE_ROUNDS * 2
+    assert len(stored(TestClient(app))) == RACE_ROUNDS
+    assert len(spy.calls) == RACE_ROUNDS
+
+
+def test_simultaneous_stops_store_one_row_and_opt_out(tmp_path, monkeypatch):
+    spy = SpyClassifier()
+    db_path = str(tmp_path / "race.db")
+    app = create_app(db_path, spy)
+    bodies = [form(MessageSid=f"SM{i}", Body="STOP") for i in range(RACE_ROUNDS)]
+
+    statuses = deliver_in_pairs(monkeypatch, app, bodies)
+
+    assert statuses == [200] * RACE_ROUNDS * 2
+    assert len(stored(TestClient(app))) == RACE_ROUNDS
+    assert spy.calls == []
+    with closing(connect(db_path)) as conn:
+        rows = conn.execute("SELECT id FROM claimants WHERE opted_out = 1").fetchall()
+    assert [row["id"] for row in rows] == ["C-100"]

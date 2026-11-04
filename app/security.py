@@ -4,13 +4,13 @@ import re
 from typing import Dict, Optional
 from urllib.parse import parse_qs
 
-MAX_BODY_BYTES = 16 * 1024
 REQUIRED_FIELDS = ("MessageSid", "From", "To", "Body")
 NON_EMPTY_FIELDS = ("MessageSid", "From", "To")
 
 # Deliberately loose: the brief gives no format, and rejecting a signed message
-# loses it. This only blocks values that can't be a stable identifier.
-MESSAGE_SID = re.compile(r"[^\s\x00-\x1f\x7f]{1,255}")
+# loses it. This only blocks values that can't be a stable identifier, including
+# the replacement character: two different undecodable IDs would look identical.
+MESSAGE_SID = re.compile(r"[^\s\x00-\x1f\x7f\ufffd]{1,255}")
 
 
 class InvalidRequest(ValueError):
@@ -24,10 +24,9 @@ class InvalidRequest(ValueError):
 
 
 def parse_form(raw: bytes) -> Dict[str, str]:
-    try:
-        parsed = parse_qs(raw.decode("utf-8"), keep_blank_values=True, errors="strict")
-    except UnicodeDecodeError:
-        raise InvalidRequest(400, "invalid_encoding", "The body is not valid UTF-8.")
+    # Undecodable bytes become replacement characters rather than a rejection, so
+    # a signed message is never lost. The signature still covers the raw bytes.
+    parsed = parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True)
 
     for field in REQUIRED_FIELDS:
         if len(parsed.get(field, [])) > 1:
@@ -46,7 +45,7 @@ def validate_message_sid(message_sid: str) -> None:
         raise InvalidRequest(
             400,
             "invalid_message_sid",
-            "MessageSid must be 1 to 255 characters, with no spaces or control characters.",
+            "MessageSid must be 1 to 255 characters, with no spaces or unreadable characters.",
         )
 
 

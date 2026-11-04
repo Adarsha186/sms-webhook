@@ -57,6 +57,12 @@ INVALID_MESSAGE_SIDS = [
     FailureCase("sid-trailing-space", form(MessageSid="SM1 "), 400, "invalid_message_sid"),
     FailureCase("sid-trailing-newline", form(MessageSid="SM1\n"), 400, "invalid_message_sid"),
     FailureCase("sid-nul-byte", form(MessageSid="SM\x001"), 400, "invalid_message_sid"),
+    FailureCase(
+        "sid-undecodable",
+        form().replace(b"MessageSid=SM1000", b"MessageSid=SM%FF1"),
+        400,
+        "invalid_message_sid",
+    ),
     FailureCase("sid-too-long", form(MessageSid="S" * 256), 400, "invalid_message_sid"),
     FailureCase(
         "sid-sql-text",
@@ -69,14 +75,7 @@ INVALID_MESSAGE_SIDS = [
 MALFORMED_BODIES = [
     FailureCase("repeated-to", form() + b"&To=%2B15550000002", 400, "repeated_field"),
     FailureCase("repeated-sid", form() + b"&MessageSid=SM2", 400, "repeated_field"),
-    FailureCase("raw-invalid-utf8", b"\xff\xfe", 400, "invalid_encoding"),
-    FailureCase(
-        "percent-encoded-invalid-utf8",
-        form().replace(b"Body=Hello", b"Body=%FF"),
-        400,
-        "invalid_encoding",
-    ),
-    FailureCase("request-too-large", form(Body="x" * 20000), 413, "request_too_large"),
+    FailureCase("undecodable-bytes-with-no-fields", b"\xff\xfe", 400, "missing_field"),
 ]
 
 UNKNOWN_NUMBERS = [
@@ -109,6 +108,16 @@ BAD_SIGNATURES = [
         "invalid_signature",
         sign(form()),
     ),
+    FailureCase(
+        "large-body-unsigned", form(Body="x" * 20000), 403, "invalid_signature", None
+    ),
+    FailureCase(
+        "undecodable-body-unsigned",
+        form().replace(b"Body=Hello", b"Body=caf%E9"),
+        403,
+        "invalid_signature",
+        None,
+    ),
     FailureCase("bad-sid-unsigned", form(MessageSid="SM 1"), 403, "invalid_signature", None),
     FailureCase("forged-stop-unsigned", form(Body="STOP"), 403, "invalid_signature", None),
     FailureCase("forged-stop-wrong", form(Body="STOP"), 403, "invalid_signature", "0" * 64),
@@ -139,6 +148,9 @@ ACCEPTED_BODIES = {
     "very-long-sender": form(From="+1" * 20),
     "sender-with-control-character": form(From="+1555\x00"),
     "empty-message-body": form(Body=""),
+    "very-long-message-body": form(Body="x" * 20000),
+    "percent-encoded-undecodable-body": form().replace(b"Body=Hello", b"Body=caf%E9"),
+    "raw-undecodable-body": form().replace(b"Body=Hello", b"Body=caf\xe9"),
     "short-code-sender": form(From="12345"),
     "unknown-sender-text": form(From="unknown"),
     "non-ascii-message-body": form(Body="Héllo ✓"),

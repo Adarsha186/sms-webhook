@@ -10,7 +10,6 @@ from app.classifier import KeywordClassifier
 from app.db import connect, get_tenant, get_tenant_by_number, init_db, list_messages
 from app.ingest import process_sms
 from app.security import (
-    MAX_BODY_BYTES,
     InvalidRequest,
     parse_form,
     validate_message_sid,
@@ -44,8 +43,6 @@ def create_app(db_path: str, classifier) -> FastAPI:
     @app.post("/webhooks/sms")
     async def receive_sms(request: Request) -> Response:
         raw = await request.body()
-        if len(raw) > MAX_BODY_BYTES:
-            raise InvalidRequest(413, "request_too_large", "The body is too large.")
         signature = request.headers.get("X-Signature")
         return await run_in_threadpool(handle_sms, raw, signature)
 
